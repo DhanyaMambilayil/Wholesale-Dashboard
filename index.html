@@ -512,10 +512,11 @@ async function loadAll(){
 
     const becCodes = new Set();
     DATA.forEach(r => { if (!r.isHO) becCodes.add(r.code); });
-    BEC_BRANCH_LIST = [...becCodes].sort().map(code => {
-      const meta = BEC_BRANCH_META[code];
-      return meta ? { code, name: meta.name, area: meta.area } : { code, name: code, area: BEC_UNASSIGNED_AREA };
-    });
+    // Only branches with a known Area Manager mapping are included —
+    // codes not in BEC_BRANCH_META are dropped entirely rather than
+    // bucketed as "Unassigned".
+    BEC_BRANCH_LIST = [...becCodes].filter(code => BEC_BRANCH_META[code]).sort()
+      .map(code => ({ code, name: BEC_BRANCH_META[code].name, area: BEC_BRANCH_META[code].area }));
 
     CUR_LIST_BY_ENTITY.bec = [...new Set(DATA.map(r => r.cur))]
       .sort((a,b) => {
