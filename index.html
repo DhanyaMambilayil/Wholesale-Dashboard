@@ -214,7 +214,7 @@
   <header>
     <div class="title-block">
       <h1>BEC Wholesale Dashboard</h1>
-      <p>Head Office / Wholesale &amp; Branch Network — Currency performance</p>
+      <p>Wholesale &amp; Branch Network — Currency performance</p>
     </div>
   </header>
 
@@ -226,8 +226,10 @@
   <div id="errorScreen" style="display:none;"></div>
 
   <div id="dashboardRoot" style="display:none;">
-    <div class="tabs" id="tabs"></div>
-    <div class="tabs" id="summaryScopeTabs" style="margin-bottom:10px;"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+      <div class="tabs" id="summaryScopeTabs" style="margin-bottom:0;"></div>
+      <div class="tabs" id="tabs" style="margin-bottom:0;"></div>
+    </div>
 
   <div id="periodView">
     <section class="cards" id="cards"></section>
@@ -700,7 +702,7 @@ function buildTabs(){
 function renderSummaryScopeTabs(){
   const el = document.getElementById('summaryScopeTabs');
   el.innerHTML = '';
-  [['ho', 'Head Office / Wholesale'], ['branch', 'Branches']].forEach(([key,label]) => {
+  [['ho', 'Wholesale'], ['branch', 'Branches']].forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (key === summaryScope ? ' active' : '');
     btn.textContent = label;
@@ -763,7 +765,7 @@ function renderCards(){
   const lastMonth = prevMonthRange(entityScope);
   const activeBranches = activeBranchesFor(entityScope, lastMonth);
   const locationsVal = summaryScope === 'ho' ? '1' : activeBranches.length.toLocaleString();
-  const locationsSub = summaryScope === 'ho' ? 'Head Office / Wholesale' : (entityHasAreas(entityScope) ? 'Active last month, across ' + AREA_LIST.length + ' areas' : 'Active last month');
+  const locationsSub = summaryScope === 'ho' ? 'Wholesale' : (entityHasAreas(entityScope) ? 'Active last month, across ' + AREA_LIST.length + ' areas' : 'Active last month');
 
   const profitText = cur.profit === null ? 'N/A' : fmtCurrency(cur.profit);
   const profitSub = (entityScope === 'ansari' && cur.profitPartial) ? { text: 'Partial — some months not entered', cls: '' } : subFor('profit');
@@ -808,7 +810,7 @@ function renderHOPanel(){
 
   const scopeRow = document.getElementById('hoScopeRow');
   scopeRow.innerHTML = '';
-  [['ho','Head Office'], ['branch','Branch Network']].forEach(([key,label]) => {
+  [['ho','Wholesale'], ['branch','Branch Network']].forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (hoScope === key ? ' active' : '');
     btn.textContent = label;
@@ -819,7 +821,7 @@ function renderHOPanel(){
   const scopeCodes = hoScope === 'ho' ? [hoCode] : branchCodes;
   const scopeAgg = hoScope === 'ho' ? hoAgg : branchAgg;
   const avgTicket = scopeAgg.count ? scopeAgg.amt / scopeAgg.count : 0;
-  const scopeLabel = hoScope === 'ho' ? 'Head Office' : 'Branch Network';
+  const scopeLabel = hoScope === 'ho' ? 'Wholesale' : 'Branch Network';
 
   document.getElementById('hoHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
 
@@ -904,7 +906,7 @@ function renderTrendPanel(){
 
   const scopeRow = document.getElementById('trendScopeRow');
   scopeRow.innerHTML = '';
-  [['ho','Head Office'], ['branch','Branches']].forEach(([key,label]) => {
+  [['ho','Wholesale'], ['branch','Branches']].forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn gold' + (trendScope === key ? ' active' : '');
     btn.textContent = label;
@@ -976,7 +978,7 @@ function renderCurrencyTrendPanel(){
 
   const scopeRow = document.getElementById('curTrendScopeRow');
   scopeRow.innerHTML = '';
-  [['ho','Head Office'], ['branch','Branches']].forEach(([key,label]) => {
+  [['ho','Wholesale'], ['branch','Branches']].forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn gold' + (curTrendScope === key ? ' active' : '');
     btn.textContent = label;
