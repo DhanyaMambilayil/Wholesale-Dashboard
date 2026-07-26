@@ -3,49 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wholesale Desk Dashboard</title>
+<title>Wholesale Dashboard</title>
 
 <!--
   =====================================================================
-  ABOUT THIS FILE
+  ABOUT THIS FILE — v2: real data, fetched from CSV files
   =====================================================================
-  Built from your uploaded FCY Surveillance Report (21-JUL-2026), which
-  contains one full day of real branch-level transaction data (364 rows,
-  33 codes incl. Head Office, 26 currencies) — search "txn-data" below.
+  This version no longer embeds data in the HTML. It fetches CSV files
+  from a sibling "data/" folder at load time, so updating the numbers
+  is just: edit a CSV, commit, push. See the README / chat instructions
+  for exact GitHub steps.
 
-  ASSUMPTIONS MADE WHILE BUILDING THIS — please confirm or correct:
-  1. There's no separate "current date" tab anymore — Month to Date and
-     Year to Date are both simulated, scaled from the one real day of
-     data (per your instruction), so this dashboard now always shows
-     projected figures rather than a raw daily snapshot.
-  2. MoM% (next to the Month to Date tab) and YoY% (next to Year to Date)
-     are also simulated — there's no real prior-month or prior-year data,
-     so a comparable synthetic total was generated the same way as the
-     current period and the % change is computed against that.
-  3. Head Office (code 9999) is the wholesale desk itself. Its panel now
-     also compares Head Office volume against total Branch Network
-     volume per currency (grouped bars), so you can see the wholesale
-     vs. retail split directly. The panel's table can be minimized with
-     the "Hide table" link.
-  4. Branch comparison and Branch Currency-wise Comparison both exclude
-     Head Office and cover the 35 branches across your 3 areas (SHABIR,
-     SAKEER, ANOOP). Branch comparison no longer shows Active Customers
-     per branch (Volume and Transactions only). Branch Currency-wise
-     Comparison uses Area/Branch dropdowns and defaults to all branches
-     (excluding Head Office).
-  5. The old "Branch performance by currency" matrix panel and the
-     "Customer & channel mix" panel have been removed per your request.
-  6. "Volume" = Txn Amount (the KWD-equivalent local currency amount).
-  7. Added BEC / ANSARI entity tabs above Month to Date / Year to Date,
-     defaulting to ANSARI (the uploaded report is for Al Ansari
-     Exchange, and its figures are unchanged from before). There's no
-     real BEC data at all, so BEC's entire scale is simulated as ~42%
-     of Ansari's figures (a fixed, made-up ratio — replace with real
-     BEC data as soon as it's available).
+  EXPECTED FILES (relative to this HTML file):
+    data/bec-2025.csv                 (BEC Head Office / Wholesale, frozen)
+    data/bec-2026.csv                 (BEC Head Office / Wholesale, growing)
+    data/bec-branches-2025.csv        (BEC branch network, frozen)
+    data/bec-branches-2026.csv        (BEC branch network, growing)
+    data/ansari-2026.csv              (Ansari, real May 1 – Jul 24 2026 so far)
+    data/ansari-gross-profit-manual.csv (Ansari Gross Profit, filled in by hand, monthly)
+
+  IMPORTANT CAVEATS — please read:
+  1. This dashboard now shows REAL figures wherever real data exists,
+     and clearly marks "N/A" / "partial" where it doesn't — it no
+     longer fabricates placeholder numbers the way earlier versions
+     did, since that would be misleading for a live operational tool.
+  2. BEC is fully real for both 2025 and 2026 — so MTD, YTD, MoM, and
+     YoY are all genuine computed comparisons for BEC.
+  3. Ansari only has real data from 1 May 2026 onward. There's no 2025
+     Ansari data and no Jan–Apr 2026 data, so: MTD and MoM are real
+     (since the current month and the prior month are both covered);
+     YTD only reflects May 1 onward (labelled "partial year"); YoY is
+     not available at all (shown as N/A) until 2025 data is provided.
+  4. Ansari has no real Gross Profit / commission data (near-zero in
+     the source report), so Gross Profit for Ansari comes entirely
+     from the manual monthly file. If a month hasn't been filled in
+     yet, it's excluded and the figure is labelled "partial".
+  5. BEC's branch network (from branches_fx_dump.xlsx) has no area/
+     region grouping provided, so the Area dropdown only applies to
+     Ansari; for BEC it just offers "All Branches" plus each branch
+     code directly (e.g. AIR, T5A, MB2 — these are BEC's own branch
+     codes, not the SHABIR/SAKEER/ANOOP structure used for Ansari).
+  6. Ansari has no real Buy-side transactions (FCY-Sale report only),
+     so selecting "Buy" alone for Ansari will correctly show empty /
+     zero — that's accurate, not a bug.
+  7. This file must be served over http(s) to fetch the CSVs — opening
+     it directly as a local file (file://) will fail due to browser
+     CORS restrictions. Use GitHub Pages, a local dev server, etc.
   =====================================================================
 -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script>
   if (typeof Chart === 'undefined') {
     document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"><\/script>');
@@ -207,6 +215,11 @@
     background:none; border:none; color:var(--accent); font-family:var(--sans); font-weight:600;
     font-size:12.5px; cursor:pointer; padding:0; margin-bottom:10px; display:inline-block;
   }
+  .load-screen{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; gap:14px; }
+  .load-spinner{ width:36px; height:36px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--accent); animation:spin 0.8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .error-box{ background:#3A1F26; border:1px solid #7A2E3A; color:#FFC9CE; padding:16px 20px; border-radius:10px; font-family:var(--sans); font-size:13px; line-height:1.6; max-width:640px; }
+  .na-text{ color:var(--ink-soft); font-style:italic; }
 
 </style>
 </head>
@@ -220,134 +233,164 @@
     </div>
   </header>
 
-  <div class="tabs" id="entityTabs" style="margin-bottom:10px;"></div>
-  <div class="tabs" id="tabs"></div>
+  <div id="loadScreen" class="load-screen">
+    <div class="load-spinner"></div>
+    <div style="color:var(--ink-soft);font-family:var(--sans);font-size:13px;">Loading data files…</div>
+  </div>
 
-<div id="periodView">
-  <section class="cards" id="cards"></section>
+  <div id="errorScreen" style="display:none;"></div>
 
-  <section class="panel" id="hoPanel">
-    <h2 class="accordion-head" onclick="toggleSection('ho')">
-      <span>Head Office <span class="hint" style="font-weight:500;">vs Branch Network</span></span>
-      <span style="display:flex;align-items:center;gap:10px;">
-        <span class="hint" id="hoHint"></span>
-        <span class="accordion-icon" id="hoIcon">+</span>
-      </span>
-    </h2>
-    <div class="panel-body collapsed" id="hoBody">
-      <div class="tabs" id="hoScopeRow" style="margin-bottom:16px;"></div>
-      <div class="cards" id="hoCards" style="margin-bottom:16px;"></div>
-      <div class="pill-row" id="hoMetricRow"></div>
-      <div class="chart-wrap"><canvas id="hoChart"></canvas></div>
-      <button class="table-toggle-btn" id="hoTableToggleBtn" onclick="toggleHOTable()">Hide table ▴</button>
-      <div id="hoTableWrap" class="table-scroll">
-        <table id="hoTable">
-          <thead><tr id="hoTableHead"></tr></thead>
-          <tbody id="hoTableBody"></tbody>
-        </table>
-      </div>
+  <div id="dashboardRoot" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+      <div class="tabs" id="entityTabs" style="margin-bottom:0;"></div>
+      <div class="tabs" id="tabs" style="margin-bottom:0;"></div>
     </div>
-  </section>
+    <div class="tabs" id="summaryScopeTabs" style="margin-bottom:10px;"></div>
 
-  <section class="panel" id="trendPanel">
-    <h2 class="accordion-head" onclick="toggleSection('trend')">
-      <span id="trendTitle">Trend</span>
-      <span style="display:flex;align-items:center;gap:10px;">
-        <span class="hint" id="trendHint"></span>
-        <span class="accordion-icon" id="trendIcon">+</span>
-      </span>
-    </h2>
-    <div class="panel-body collapsed" id="trendBody">
-      <div class="pill-row" id="trendScopeRow"></div>
-      <div class="pill-row" id="trendMetricRow"></div>
-      <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
-    </div>
-  </section>
+  <div id="periodView">
+    <section class="cards" id="cards"></section>
 
-  <section class="panel" id="curTrendPanel">
-    <h2 class="accordion-head" onclick="toggleSection('curTrend')">
-      <span id="curTrendTitle">Currency-wise Trend</span>
-      <span style="display:flex;align-items:center;gap:10px;">
-        <span class="hint" id="curTrendHint"></span>
-        <span class="accordion-icon" id="curTrendIcon">+</span>
-      </span>
-    </h2>
-    <div class="panel-body collapsed" id="curTrendBody">
-      <div style="margin-bottom:16px;">
-        <select class="filter-select" id="curTrendSelect"></select>
+    <section class="panel" id="hoPanel">
+      <h2 class="accordion-head" onclick="toggleSection('ho')">
+        <span>Currency Performance Overview</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hint" id="hoHint"></span>
+          <span class="accordion-icon" id="hoIcon">+</span>
+        </span>
+      </h2>
+      <div class="panel-body collapsed" id="hoBody">
+        <div class="tabs" id="hoScopeRow" style="margin-bottom:16px;"></div>
+        <div class="cards" id="hoCards" style="margin-bottom:16px;"></div>
+        <div class="pill-row" id="hoTxnTypeRow"></div>
+        <div class="pill-row" id="hoMetricRow"></div>
+        <div class="chart-wrap"><canvas id="hoChart"></canvas></div>
+        <button class="table-toggle-btn" id="hoTableToggleBtn" onclick="toggleHOTable()">Hide table ▴</button>
+        <div id="hoTableWrap" class="table-scroll">
+          <table id="hoTable">
+            <thead><tr id="hoTableHead"></tr></thead>
+            <tbody id="hoTableBody"></tbody>
+          </table>
+        </div>
       </div>
-      <div class="pill-row" id="curTrendMetricRow"></div>
-      <div class="chart-wrap"><canvas id="curTrendChart"></canvas></div>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel" id="branchPanel">
-    <h2 class="accordion-head" onclick="toggleSection('branch')">
-      <span>Branch comparison <span class="hint" style="font-weight:500;">(excl. Head Office)</span></span>
-      <span style="display:flex;align-items:center;gap:10px;">
-        <span class="hint" id="branchHint"></span>
-        <span class="accordion-icon" id="branchIcon">+</span>
-      </span>
-    </h2>
-    <div class="panel-body collapsed" id="branchBody">
-      <div class="pill-row" id="branchAreaRow"></div>
-      <div class="pill-row" id="branchMetricRow"></div>
-      <div class="chart-wrap tall"><canvas id="branchChart"></canvas></div>
-      <div class="table-scroll" style="margin-top:16px;">
-        <table id="branchTable">
-          <thead><tr id="branchTableHead"></tr></thead>
-          <tbody id="branchTableBody"></tbody>
-        </table>
+    <section class="panel" id="trendPanel">
+      <h2 class="accordion-head" onclick="toggleSection('trend')">
+        <span id="trendTitle">Performance Trend</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hint" id="trendHint"></span>
+          <span class="accordion-icon" id="trendIcon">+</span>
+        </span>
+      </h2>
+      <div class="panel-body collapsed" id="trendBody">
+        <div class="pill-row" id="trendScopeRow"></div>
+        <div class="pill-row" id="trendTxnTypeRow"></div>
+        <div class="pill-row" id="trendMetricRow"></div>
+        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel" id="curPanel">
-    <h2 class="accordion-head" onclick="toggleSection('cur')">
-      <span>Branch Currency-wise Comparison</span>
-      <span style="display:flex;align-items:center;gap:10px;">
-        <span class="hint" id="curHint"></span>
-        <span class="accordion-icon" id="curIcon">+</span>
-      </span>
-    </h2>
-    <div class="panel-body collapsed" id="curBody">
-      <div style="margin-bottom:16px;">
-        <select class="filter-select" id="curAreaSelect"></select>
-        <select class="filter-select" id="curBranchSelect"></select>
+    <section class="panel" id="curTrendPanel">
+      <h2 class="accordion-head" onclick="toggleSection('curTrend')">
+        <span id="curTrendTitle">Performance Trend by currency</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hint" id="curTrendHint"></span>
+          <span class="accordion-icon" id="curTrendIcon">+</span>
+        </span>
+      </h2>
+      <div class="panel-body collapsed" id="curTrendBody">
+        <div style="margin-bottom:16px;">
+          <select class="filter-select" id="curTrendSelect"></select>
+        </div>
+        <div class="pill-row" id="curTrendScopeRow"></div>
+        <div class="pill-row" id="curTrendTxnTypeRow"></div>
+        <div class="pill-row" id="curTrendMetricRow"></div>
+        <div class="chart-wrap"><canvas id="curTrendChart"></canvas></div>
       </div>
-      <div class="pill-row" id="curMetricRow"></div>
-      <div class="chart-wrap"><canvas id="curChart"></canvas></div>
-      <div class="table-scroll" style="margin-top:16px;">
-        <table id="curTable">
-          <thead><tr id="curTableHead"></tr></thead>
-          <tbody id="curTableBody"></tbody>
-        </table>
+    </section>
+
+    <section class="panel" id="branchPanel">
+      <h2 class="accordion-head" onclick="toggleSection('branch')">
+        <span>Branch FX Performance Comparison</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hint" id="branchHint"></span>
+          <span class="accordion-icon" id="branchIcon">+</span>
+        </span>
+      </h2>
+      <div class="panel-body collapsed" id="branchBody">
+        <div style="margin-bottom:16px;">
+          <select class="filter-select" id="branchAreaSelect"></select>
+          <select class="filter-select" id="branchBranchSelect"></select>
+        </div>
+        <div class="pill-row" id="branchTxnTypeRow"></div>
+        <div class="pill-row" id="branchMetricRow"></div>
+        <div class="chart-wrap tall"><canvas id="branchChart"></canvas></div>
+        <div class="table-scroll" style="margin-top:16px;">
+          <table id="branchTable">
+            <thead><tr id="branchTableHead"></tr></thead>
+            <tbody id="branchTableBody"></tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+
+    <section class="panel" id="curPanel">
+      <h2 class="accordion-head" onclick="toggleSection('cur')">
+        <span>Branch Currency-wise Comparison</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hint" id="curHint"></span>
+          <span class="accordion-icon" id="curIcon">+</span>
+        </span>
+      </h2>
+      <div class="panel-body collapsed" id="curBody">
+        <div style="margin-bottom:16px;">
+          <select class="filter-select" id="curAreaSelect"></select>
+          <select class="filter-select" id="curBranchSelect"></select>
+        </div>
+        <div class="pill-row" id="curTxnTypeRow"></div>
+        <div class="pill-row" id="curMetricRow"></div>
+        <div class="chart-wrap"><canvas id="curChart"></canvas></div>
+        <div class="table-scroll" style="margin-top:16px;">
+          <table id="curTable">
+            <thead><tr id="curTableHead"></tr></thead>
+            <tbody id="curTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+  </div>
+
 </div>
-
-</div>
-<script type="application/json" id="txn-data">
-[{"code":"3204","cur":"SAR","fcy":2400,"amt":200,"hr":8,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872390","cn":"SAUD FAISAL BWAITEL ALBUGHAILI","fee":0},{"code":"3204","cur":"USD","fcy":4800,"amt":1500,"hr":8,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400673354","cn":"MOHAMMAD ALI HASSAN MOHAMMAD","fee":0},{"code":"3204","cur":"USD","fcy":200,"amt":62.8,"hr":8,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872392","cn":"SAID ALMEHRATH","fee":0},{"code":"1101","cur":"INR","fcy":6000,"amt":20.28,"hr":8,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"999900096878","cn":"ABDUL GAFUR ABDUL HAMID","fee":0},{"code":"3204","cur":"USD","fcy":3000,"amt":937.5,"hr":8,"pm":"C","nat":"ALGERIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872395","cn":"JAN MIR HAYAT MIR","fee":0},{"code":"2103","cur":"USD","fcy":100,"amt":31.3,"hr":9,"pm":"N","nat":"SRI LANKAN","res":"R","pur":"PERSONAL NEEDS","sid":"130100200938","cn":"CHATHURIKA KUMARIKIRIPITILAGE","fee":0},{"code":"6101","cur":"SAR","fcy":3000,"amt":250.5,"hr":9,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100871352","cn":"MOHAMED MOHYELDIN MOSTAFA KAMAL ALI","fee":0},{"code":"3101","cur":"USD","fcy":2000,"amt":625,"hr":9,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872397","cn":"HASSN MOHAMAD GHADBAN","fee":0},{"code":"6101","cur":"SAR","fcy":1000,"amt":83.5,"hr":9,"pm":"C","nat":"JORDANIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100842128","cn":"KHALED SALAH MOHAMMAD ALI","fee":0},{"code":"5106","cur":"USD","fcy":6400,"amt":2000,"hr":9,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872401","cn":"MD TNAYYAN SAAD ALHAJRI","fee":0},{"code":"3204","cur":"INR","fcy":2000,"amt":6.897,"hr":9,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"130100211956","cn":"HAMZA KASIM MUJAWAR","fee":0.007},{"code":"1101","cur":"INR","fcy":10500,"amt":35.354,"hr":9,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872402","cn":"RASHETH MAKBULBASHA","fee":0.004},{"code":"3101","cur":"SAR","fcy":12010,"amt":999.85,"hr":9,"pm":"C","nat":"SAUDI ARABIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872403","cn":"MOHAMMED HANI M ALHOMOUD","fee":0},{"code":"6101","cur":"SAR","fcy":1500,"amt":125.25,"hr":9,"pm":"C","nat":"JORDANIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100844048","cn":"ABADA HAMED HASEN HOURANI","fee":0},{"code":"3203","cur":"SAR","fcy":960,"amt":79.92,"hr":9,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320300748690","cn":"MOHAMMED MUSTAQ SHAIK","fee":0},{"code":"3203","cur":"SAR","fcy":360,"amt":29.97,"hr":9,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320300748690","cn":"MOHAMMED MUSTAQ SHAIK","fee":0},{"code":"5106","cur":"SAR","fcy":12010,"amt":999.999,"hr":9,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872407","cn":"SALEM DHAFER MOHAMMAD ALAJMI","fee":0.001},{"code":"3204","cur":"USD","fcy":100,"amt":31.5,"hr":9,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872408","cn":"AYMAN JASEEM ALALOOSH","fee":0},{"code":"3105","cur":"EGP","fcy":2000,"amt":14.8,"hr":9,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310500872413","cn":"MOHAMMAD GHANIM RASHED ALRUSHOUD","fee":0},{"code":"3105","cur":"USD","fcy":5000,"amt":1565,"hr":9,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310500872413","cn":"MOHAMMAD GHANIM RASHED ALRUSHOUD","fee":0},{"code":"5109","cur":"USD","fcy":2000,"amt":626,"hr":9,"pm":"C","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"510900872411","cn":"AHMAD IHMAED HUSSAIN","fee":0},{"code":"6104","cur":"SAR","fcy":1200,"amt":100.008,"hr":9,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610400872415","cn":"MONA DHAIFALLAH MATAR ALENEZI","fee":0.008},{"code":"1105","cur":"USD","fcy":200,"amt":62.8,"hr":9,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"99990000218037","cn":"MOHAMMED ABDUL RASSOL HUSSAIN","fee":0},{"code":"5101","cur":"SAR","fcy":12010,"amt":1000,"hr":9,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872407","cn":"SALEM DHAFER MOHAMMAD ALAJMI","fee":0},{"code":"5103","cur":"INR","fcy":2000,"amt":6.7,"hr":9,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510300149934","cn":"SRINIVAS KANDI","fee":0},{"code":"5109","cur":"NPR","fcy":8750,"amt":20.25,"hr":9,"pm":"C","nat":"NEPALESE","res":"R","pur":"PERSONAL NEEDS","sid":"610300578978","cn":"AVIRENDRA THAKUR","fee":0},{"code":"3101","cur":"INR","fcy":5000,"amt":16.835,"hr":9,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100391951","cn":"RIYAZ AHMAD YAD AHMAD","fee":0},{"code":"3101","cur":"SAR","fcy":600,"amt":49.98,"hr":10,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872420","cn":"HAYATEAAN NAFEL ALRASHEEDI","fee":0},{"code":"3101","cur":"SAR","fcy":360,"amt":29.988,"hr":10,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872420","cn":"HAYATEAAN NAFEL ALRASHEEDI","fee":0},{"code":"2104","cur":"INR","fcy":4000,"amt":13.468,"hr":10,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100687086","cn":"VENKATESH KAMBAIYAGARI","fee":0.008},{"code":"1101","cur":"USD","fcy":3200,"amt":1001.6,"hr":10,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100870496","cn":"AMNA MOHAMED MOHAMED ABOUDKA","fee":0},{"code":"5101","cur":"INR","fcy":3000,"amt":10.101,"hr":10,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100680552","cn":"HABIB ULLAH ALMIN","fee":0.001},{"code":"4102","cur":"INR","fcy":20000,"amt":68,"hr":10,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000274531","cn":"DHANPAL PANCHAL","fee":0},{"code":"5101","cur":"AED","fcy":19000,"amt":1599.914,"hr":10,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100872422","cn":"MOHAMMAD FADHEL JOHAR ABDULLAH","fee":0.006},{"code":"5106","cur":"SAR","fcy":8000,"amt":666,"hr":10,"pm":"N","nat":"SAUDI ARABIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510700700998","cn":"MOHAMMAD THIAB FARHAN ALARSHEEDI","fee":0},{"code":"1101","cur":"USD","fcy":6400,"amt":2003.2,"hr":10,"pm":"N","nat":"LEBANESE","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872427","cn":"SALLOUM NICOLAS","fee":0},{"code":"3204","cur":"BDT","fcy":10000,"amt":28.5,"hr":10,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000288555","cn":"MD LITON MIAH HAZRAT ALI","fee":0},{"code":"3204","cur":"AED","fcy":1000,"amt":84.206,"hr":10,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400671654","cn":"EZZAT METWALY AHMED METWALY","fee":0.006},{"code":"3204","cur":"SAR","fcy":1000,"amt":83.3,"hr":10,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400671654","cn":"EZZAT METWALY AHMED METWALY","fee":0.006},{"code":"3203","cur":"USD","fcy":100,"amt":31.25,"hr":10,"pm":"N","nat":"ROMANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400665360","cn":"RASHED AJMI AL MOHAMMAD","fee":0},{"code":"1105","cur":"USD","fcy":40,"amt":12.6,"hr":10,"pm":"C","nat":"IRAQI","res":"R","pur":"PERSONAL NEEDS","sid":"110500872429","cn":"HAMEED JAYED KHASHIN AL GREJ","fee":0},{"code":"3105","cur":"INR","fcy":6000,"amt":20.202,"hr":10,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310500872431","cn":"KARI LAL DAMOR","fee":0.002},{"code":"9999","cur":"SAR","fcy":200000,"amt":16540,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200019766","cn":"RIYAL EXCHANGE CO","fee":0},{"code":"9999","cur":"USD","fcy":400000,"amt":124200,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200019766","cn":"RIYAL EXCHANGE CO","fee":0},{"code":"9999","cur":"USD","fcy":50000,"amt":15530,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200019766","cn":"RIYAL EXCHANGE CO","fee":0},{"code":"3204","cur":"AED","fcy":6000,"amt":505.236,"hr":10,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872433","cn":"MOHSEN ALI SARAB MOHAMMAD","fee":0},{"code":"3204","cur":"AED","fcy":500,"amt":42.103,"hr":10,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872433","cn":"MOHSEN ALI SARAB MOHAMMAD","fee":0.003},{"code":"3101","cur":"AED","fcy":21000,"amt":1768.326,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"TRADE/IMPORT","sid":"310100838031","cn":"AL MUTAHIDOON INTERNATIONAL","fee":0.004},{"code":"9999","cur":"TRY","fcy":200000,"amt":1345,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0.002},{"code":"9999","cur":"MYR","fcy":12357,"amt":949.018,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0.002},{"code":"9999","cur":"USD","fcy":50000,"amt":15535,"hr":10,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0.002},{"code":"3204","cur":"USD","fcy":3200,"amt":1000,"hr":10,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872436","cn":"HAMED SOUHAIL ALAHMAD","fee":0},{"code":"3203","cur":"SAR","fcy":2500,"amt":208.125,"hr":10,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"320300872437","cn":"ABDEL SAMAD ABDELSATER HEMDAN","fee":0},{"code":"3204","cur":"INR","fcy":1680,"amt":5.75,"hr":10,"pm":"C","nat":"SRI LANKAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872438","cn":"ANURA PRIYANTHA HERATH","fee":0},{"code":"4102","cur":"JOD","fcy":1000,"amt":443,"hr":11,"pm":"C","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"310100343932","cn":"HUSSAIN HASSAN MOFLEH","fee":0},{"code":"9999","cur":"USD","fcy":80000,"amt":24856,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"EUR","fcy":15000,"amt":5329.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"5106","cur":"USD","fcy":500,"amt":156.25,"hr":11,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510200111817","cn":"DAMEN JIHAD MAKLAD","fee":0},{"code":"3101","cur":"USD","fcy":200,"amt":62.6,"hr":11,"pm":"C","nat":"IRAQI","res":"R","pur":"PERSONAL NEEDS","sid":"310100872423","cn":"MOHAMMED RAHI ABD","fee":0},{"code":"9999","cur":"TRY","fcy":600000,"amt":4035,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330830","cn":"LULU EXCHANGE COMPANY WLL","fee":0},{"code":"9999","cur":"USD","fcy":400000,"amt":124500,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330830","cn":"LULU EXCHANGE COMPANY WLL","fee":0},{"code":"9999","cur":"USD","fcy":50000,"amt":15537.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"JOD","fcy":7000,"amt":3079.3,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"2102","cur":"AED","fcy":35,"amt":2.947,"hr":11,"pm":"C","nat":"INDONESIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110500630854","cn":"MUHAMMAD ZAM ZAM","fee":0.003},{"code":"3101","cur":"USD","fcy":640,"amt":200.16,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872441","cn":"ESRAA SABHA JARRAH MUHANNA JERRAH","fee":0.001},{"code":"3101","cur":"TRY","fcy":43540,"amt":299.991,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872441","cn":"ESRAA SABHA JARRAH MUHANNA JERRAH","fee":0.001},{"code":"9999","cur":"SAR","fcy":70000,"amt":5792.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"1106","cur":"INR","fcy":5000,"amt":17,"hr":11,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110600811155","cn":"AHMAD BASHA PATAN","fee":0},{"code":"3204","cur":"USD","fcy":2000,"amt":625,"hr":11,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400764840","cn":"AKRAM SALAH KHALAFALLA","fee":0},{"code":"2103","cur":"SAR","fcy":100,"amt":8.345,"hr":11,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210300695946","cn":"YASSER ABDULJALIL ABOKANOON","fee":0.005},{"code":"2103","cur":"USD","fcy":800,"amt":250.8,"hr":11,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210300695946","cn":"YASSER ABDULJALIL ABOKANOON","fee":0.005},{"code":"4102","cur":"AED","fcy":10500,"amt":884.163,"hr":11,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110500681182","cn":"KAMLESH DABGAR TEK CHAND DABGAR","fee":0.01},{"code":"9999","cur":"USD","fcy":5000,"amt":1553.75,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"9999","cur":"TRY","fcy":140000,"amt":942.2,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"9999","cur":"USD","fcy":1500000,"amt":465750,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330981","cn":"KUWAIT FINANCE HOUSE","fee":0},{"code":"9999","cur":"USD","fcy":40000,"amt":12428,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"JOD","fcy":7000,"amt":3078.6,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"IDR","fcy":50000000,"amt":895,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"TRY","fcy":100000,"amt":673,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"USD","fcy":20000,"amt":6215,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"6101","cur":"USD","fcy":2500,"amt":782.5,"hr":11,"pm":"N","nat":"LEBANESE","res":"R","pur":"PERSONAL NEEDS","sid":"610100340510","cn":"JAD NICOLAS   AKL","fee":0},{"code":"9999","cur":"GBP","fcy":10000,"amt":4186,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200020253","cn":"U J EXCHANGE COMPANY","fee":0},{"code":"9999","cur":"JOD","fcy":10000,"amt":4399,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200020253","cn":"U J EXCHANGE COMPANY","fee":0},{"code":"9999","cur":"USD","fcy":60000,"amt":18645,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200020253","cn":"U J EXCHANGE COMPANY","fee":0},{"code":"9999","cur":"EGP","fcy":60000,"amt":421.8,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200020253","cn":"U J EXCHANGE COMPANY","fee":0},{"code":"3204","cur":"INR","fcy":3000,"amt":10.345,"hr":11,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872455","cn":"ILIYAS SATTAR","fee":0.005},{"code":"9999","cur":"TRY","fcy":100000,"amt":673,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"PHP","fcy":100000,"amt":518,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"EUR","fcy":10000,"amt":3554,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"9999","cur":"USD","fcy":50000,"amt":15537.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100330837","cn":"NATIONAL EXCHANGE CO","fee":0},{"code":"2103","cur":"USD","fcy":600,"amt":187.8,"hr":11,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210200123618","cn":"KHALED KHODER SALMA","fee":0},{"code":"9999","cur":"USD","fcy":20000,"amt":6215,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"SAR","fcy":35000,"amt":2896.25,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"6102","cur":"KRW","fcy":1000,"amt":0.225,"hr":11,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320200179606","cn":"JINESH KALLINGAL NARAYANAN KUTTY","fee":0.005},{"code":"3204","cur":"SAR","fcy":8700,"amt":724.71,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400858605","cn":"MUBARAK KHALED MUBARAK ALZOAIBI","fee":0},{"code":"9999","cur":"USD","fcy":10000,"amt":3112.75,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"PHP","fcy":100000,"amt":518,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"9999","cur":"JOD","fcy":5000,"amt":2199.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"9999","cur":"USD","fcy":45000,"amt":13983.75,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"9999","cur":"BDT","fcy":100000,"amt":273,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331045","cn":"YOUSEF AND ESRAA EXCHANGE CO W L L","fee":0},{"code":"5101","cur":"AED","fcy":76000,"amt":6399.656,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600749348","cn":"TALAL MOHAMMAD JABER ALHAJRI","fee":0.006},{"code":"5106","cur":"SAR","fcy":1380,"amt":115,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872462","cn":"MOAATH SHUJAA BJAD ALOTAIBI","fee":0},{"code":"2110","cur":"JOD","fcy":300,"amt":133.35,"hr":11,"pm":"N","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210200117576","cn":"AHMAD WAEL KHALEEL DAOUD","fee":0},{"code":"9999","cur":"CAD","fcy":10000,"amt":2219,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"USD","fcy":10000,"amt":3107.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"USD","fcy":50000,"amt":15565,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"AUD","fcy":10000,"amt":2216,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"SAR","fcy":50000,"amt":4137.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"JOD","fcy":5000,"amt":2199.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110100331033","cn":"AL TAWOOS  INTERNATIONAL","fee":0},{"code":"9999","cur":"EGP","fcy":100000,"amt":702,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"USD","fcy":50000,"amt":15537.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"3204","cur":"AED","fcy":11865,"amt":999.104,"hr":11,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320200116676","cn":"OOMMAN GEORGE NIRANNANILATHU","fee":0.004},{"code":"9999","cur":"EUR","fcy":100000,"amt":35525,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"5106","cur":"SAR","fcy":720,"amt":60,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872462","cn":"MOAATH SHUJAA BJAD ALOTAIBI","fee":0},{"code":"9999","cur":"USD","fcy":100000,"amt":31125,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"9999","cur":"JOD","fcy":15000,"amt":6598.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"5106","cur":"AED","fcy":20000,"amt":1684.12,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600749348","cn":"TALAL MOHAMMAD JABER ALHAJRI","fee":0},{"code":"9999","cur":"SAR","fcy":35000,"amt":2896.25,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"EGP","fcy":20000,"amt":140.6,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"NPR","fcy":20000,"amt":45,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"USD","fcy":20000,"amt":6215,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"JOD","fcy":5000,"amt":2199.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900009152","cn":"AL MUKHAZEM EXCHANGE COMPANY W","fee":0},{"code":"9999","cur":"PKR","fcy":300000,"amt":375,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"SAR","fcy":100000,"amt":8275,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"BDT","fcy":190000,"amt":518.7,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"USD","fcy":70000,"amt":21752.5,"hr":11,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"5104","cur":"JOD","fcy":1400,"amt":622.72,"hr":11,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100106143","cn":"MOHAMMAD JABER SHAITAN ALAJMI","fee":0},{"code":"5106","cur":"BDT","fcy":5000,"amt":14.3,"hr":11,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"510600872477","cn":"BILLAL NAWAB ALI","fee":0},{"code":"9999","cur":"SAR","fcy":100000,"amt":8275,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"JOD","fcy":10000,"amt":4399,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"PHP","fcy":100000,"amt":518,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"LKR","fcy":100000,"amt":106,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"EGP","fcy":60000,"amt":423,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"NPR","fcy":100000,"amt":225,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"USD","fcy":40000,"amt":12441,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"2103","cur":"JOD","fcy":70,"amt":31,"hr":12,"pm":"N","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"999900095544","cn":"YOUSEF HASAN AHMAD MUFARREJ","fee":0},{"code":"2107","cur":"INR","fcy":6000,"amt":20.202,"hr":12,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210700596264","cn":"MOHAMED ALI NOOR MOHAMED","fee":0.002},{"code":"6101","cur":"SAR","fcy":1500,"amt":125.25,"hr":12,"pm":"C","nat":"JORDANIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100847104","cn":"FADEL IBRAHIM TAMER KHALED","fee":0},{"code":"9999","cur":"SAR","fcy":150000,"amt":12412.5,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"9999","cur":"CHF","fcy":16070,"amt":6186.95,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"9999","cur":"USD","fcy":100000,"amt":31125,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"110200129722","cn":"ATLAS EXCHANGE COMPANY  W L L","fee":0},{"code":"6104","cur":"JOD","fcy":436,"amt":192.712,"hr":12,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610400872415","cn":"MONA DHAIFALLAH MATAR ALENEZI","fee":0.002},{"code":"2102","cur":"EUR","fcy":200,"amt":72.1,"hr":12,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210200872485","cn":"KHALED HAMAD HAMEED ALALI","fee":0},{"code":"9999","cur":"SAR","fcy":20000,"amt":1655,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"JOD","fcy":5000,"amt":2199.5,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"9999","cur":"USD","fcy":100000,"amt":31127.5,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"5101","cur":"BDT","fcy":3000,"amt":8.535,"hr":12,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"510100872484","cn":"MOHAMMED NOMAN MOHAMMED","fee":0.015},{"code":"3204","cur":"SAR","fcy":36000,"amt":2997,"hr":12,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400843970","cn":"SAAD NAYEF SAMLOUL ALMUTAIRI","fee":0},{"code":"3101","cur":"PHP","fcy":20000,"amt":105.7,"hr":12,"pm":"C","nat":"FILIPINO","res":"R","pur":"PERSONAL NEEDS","sid":"310400756885","cn":"NANO TABUAN ABDUL","fee":0},{"code":"5101","cur":"BHD","fcy":3132.5,"amt":2569.887,"hr":12,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100872489","cn":"AYEDH M N ALAJMI","fee":0.007},{"code":"3101","cur":"USD","fcy":3200,"amt":1000,"hr":12,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872490","cn":"IBRAHIM ELSAYED ELBADI ELSAYED ORABI","fee":0},{"code":"3101","cur":"USD","fcy":4380,"amt":1369.845,"hr":12,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100871851","cn":"YAHYA GHAZWAN HALABIA","fee":0.005},{"code":"3105","cur":"INR","fcy":10000,"amt":33.67,"hr":12,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310500872493","cn":"GANESH LAL KALAL","fee":0.03},{"code":"6104","cur":"SAR","fcy":2160,"amt":180.008,"hr":12,"pm":"C","nat":"KUWAITI","res":"NR","pur":"TRAVEL EXPENSE","sid":"610400857331","cn":"SARAH MOHAMMAD FAHAD ALAJMI","fee":0.008},{"code":"2101","cur":"USD","fcy":45,"amt":14.175,"hr":12,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100745806","cn":"SAMIR MOHAMMED HUSSAM AL DIN AL","fee":0},{"code":"6104","cur":"SAR","fcy":3000,"amt":250.008,"hr":12,"pm":"N","nat":"KUWAITI","res":"NR","pur":"TRAVEL EXPENSE","sid":"610400857331","cn":"SARAH MOHAMMAD FAHAD ALAJMI","fee":0.008},{"code":"4101","cur":"USD","fcy":1910,"amt":599.74,"hr":12,"pm":"C","nat":"SIERRA LEONIAN","res":"R","pur":"PERSONAL NEEDS","sid":"410100872497","cn":"HASSAN KANU","fee":0.01},{"code":"2104","cur":"USD","fcy":300,"amt":94.5,"hr":12,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100170979","cn":"KHALED ABOUELFETOUH ALI","fee":0},{"code":"5106","cur":"BHD","fcy":550,"amt":451.217,"hr":12,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100872489","cn":"AYEDH M N ALAJMI","fee":0.007},{"code":"1103","cur":"AED","fcy":11800,"amt":993.631,"hr":12,"pm":"C","nat":"SAUDI ARABIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110200212997","cn":"MOHAMMAD AHMAD SALEM ALMUHRI","fee":0.001},{"code":"1101","cur":"SAR","fcy":2040,"amt":169.83,"hr":12,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100872501","cn":"SIKKANTHER BASHA ABDUL HAMEED","fee":0},{"code":"6104","cur":"USD","fcy":2300,"amt":720.004,"hr":12,"pm":"C","nat":"IRAQI","res":"R","pur":"PERSONAL NEEDS","sid":"610200351399","cn":"MISHRI M  KHASHIN","fee":0.004},{"code":"9999","cur":"JOD","fcy":5000,"amt":2199.5,"hr":12,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"1103","cur":"AED","fcy":11800,"amt":993.631,"hr":12,"pm":"C","nat":"SAUDI ARABIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100629843","cn":"SAEED MOHAMMED SAEED ALMAHRI","fee":0.001},{"code":"6101","cur":"USD","fcy":10000,"amt":3120,"hr":13,"pm":"N","nat":"KUWAITI","res":"R","pur":"FINANCIAL MARKET","sid":"130200176363","cn":"JAWAD AND MAJED FOODS CO","fee":0},{"code":"6101","cur":"SAR","fcy":50000,"amt":4150,"hr":13,"pm":"N","nat":"KUWAITI","res":"R","pur":"FINANCIAL MARKET","sid":"130200176363","cn":"JAWAD AND MAJED FOODS CO","fee":0},{"code":"9999","cur":"SAR","fcy":50000,"amt":4137.5,"hr":13,"pm":"N","nat":"EMARATI","res":"R","pur":"FINANCIAL MARKET","sid":"999900188057","cn":"ALSAFA  INTERNATIONAL","fee":0},{"code":"6101","cur":"USD","fcy":20000,"amt":6250,"hr":13,"pm":"N","nat":"EMARATI","res":"R","pur":"TRADE/IMPORT","sid":"110100108893","cn":"ABDULLA  MAHMOUD ALDASHTI CO FOR VEGT","fee":0},{"code":"1103","cur":"AED","fcy":3700,"amt":311.562,"hr":13,"pm":"C","nat":"YEMENI","res":"R","pur":"PERSONAL NEEDS","sid":"110300872511","cn":"KHALED AHMED SALEM AQLMHRI","fee":0.002},{"code":"3204","cur":"USD","fcy":1500,"amt":468.75,"hr":13,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872506","cn":"SAMER AHMED ALHAZZAM","fee":0},{"code":"6102","cur":"EGP","fcy":2000,"amt":15.3,"hr":13,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610200872508","cn":"ABDULLAH HAMAD MOTLAQ ALENEZI","fee":0.008},{"code":"6102","cur":"USD","fcy":30,"amt":9.408,"hr":13,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610200872508","cn":"ABDULLAH HAMAD MOTLAQ ALENEZI","fee":0.008},{"code":"5106","cur":"USD","fcy":5920,"amt":1850,"hr":13,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600872512","cn":"ANAS ABDULLAH SALEM ALROOMI","fee":0},{"code":"5106","cur":"SAR","fcy":2595,"amt":216.034,"hr":13,"pm":"C","nat":"SAUDI ARABIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"99990000337751","cn":"ABDUL AZIZ SHUJAA H ALHAJRI","fee":0},{"code":"2102","cur":"USD","fcy":1100,"amt":344.3,"hr":13,"pm":"C","nat":"LEBANESE","res":"R","pur":"PERSONAL NEEDS","sid":"210200872518","cn":"WAJDI KAMAL AMER","fee":0},{"code":"6101","cur":"SAR","fcy":11000,"amt":918.5,"hr":13,"pm":"C","nat":"YEMENI","res":"NR","pur":"PERSONAL NEEDS","sid":"610100872519","cn":"MOHAMED MOHAMED MOHAMED DHAIBAN","fee":0},{"code":"3204","cur":"SAR","fcy":2400,"amt":199.8,"hr":13,"pm":"C","nat":"PAKISTANI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000265090","cn":"JAVED MUHAMMAD ALI SIDDIQUE","fee":0},{"code":"3105","cur":"USD","fcy":200,"amt":62.7,"hr":13,"pm":"N","nat":"AFGHAN","res":"R","pur":"PERSONAL NEEDS","sid":"310500872522","cn":"AREFULLAH HAJI FAQIR","fee":0},{"code":"2110","cur":"SAR","fcy":500,"amt":41.725,"hr":13,"pm":"N","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"211000872524","cn":"ABDDULLAH DAWUD ISMAIEL GHAZAL","fee":0},{"code":"6104","cur":"JOD","fcy":450,"amt":199.999,"hr":13,"pm":"N","nat":"KUWAITI","res":"NR","pur":"TRAVEL EXPENSE","sid":"610400872521","cn":"ABDULLAH HASAN ABBAS HUSSAIN","fee":0},{"code":"5107","cur":"EUR","fcy":2775,"amt":999,"hr":13,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100058538","cn":"MAHMOUD ABDELHAY MAHMOUD HEGAZY","fee":0},{"code":"1101","cur":"AED","fcy":3500,"amt":294.721,"hr":13,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100872529","cn":"SUHAIL RAJA RAJA MOHAMMAD","fee":0.001},{"code":"3101","cur":"INR","fcy":6000,"amt":20.3,"hr":13,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100076441","cn":"MOHAMED WALEED RAHMAN","fee":0},{"code":"5101","cur":"JOD","fcy":500,"amt":221.25,"hr":13,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100825691","cn":"DIAA NADER ALZAMEL","fee":0},{"code":"6101","cur":"USD","fcy":6000,"amt":1878,"hr":13,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"610100173449","cn":"ABOUELKHEIR MOHAMED SOBEIH","fee":0},{"code":"6101","cur":"USD","fcy":2150,"amt":674.197,"hr":13,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100859068","cn":"MOHAMED SALAMA MOHAMED ESHEIBA","fee":0.003},{"code":"3101","cur":"SAR","fcy":960,"amt":80,"hr":13,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872532","cn":"MOHAMMAD AWWADH MUHAREB ALDAIHANI","fee":0},{"code":"6101","cur":"SAR","fcy":2000,"amt":167,"hr":13,"pm":"C","nat":"JORDANIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100841772","cn":"HAJEM KHALED MOHAMMAD KHWAILEH","fee":0},{"code":"5104","cur":"USD","fcy":300,"amt":94.035,"hr":13,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000541923","cn":"TAMER MOHAMED MOUSTAFA OKDA","fee":0},{"code":"1101","cur":"AED","fcy":118756.38,"amt":10000,"hr":13,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600749348","cn":"TALAL MOHAMMAD JABER ALHAJRI","fee":0},{"code":"2103","cur":"USD","fcy":3000,"amt":939,"hr":13,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000299139","cn":"MOHAMMAD FUAD KASEM","fee":0},{"code":"1101","cur":"AED","fcy":60743.62,"amt":5114.977,"hr":13,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600749348","cn":"TALAL MOHAMMAD JABER ALHAJRI","fee":0},{"code":"6101","cur":"USD","fcy":100,"amt":31.25,"hr":13,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100690527","cn":"MAHMOUD GAMAL FARGHALY MOHAMED","fee":0},{"code":"2103","cur":"SAR","fcy":1200,"amt":100,"hr":14,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210300844400","cn":"OSAMA ABDELHAKEEM GABR AHMED","fee":0},{"code":"1105","cur":"USD","fcy":5000,"amt":1565,"hr":14,"pm":"N","nat":"TURKISH","res":"R","pur":"PERSONAL NEEDS","sid":"110500695452","cn":"MAHMUT TANER","fee":0},{"code":"1101","cur":"CNY","fcy":1074,"amt":50.478,"hr":14,"pm":"N","nat":"KUWAITI","res":"NR","pur":"TRAVEL EXPENSE","sid":"110200015822","cn":"HAMAD IBRAHEEM HUSSAN ALQATTAN","fee":0.022},{"code":"6101","cur":"USD","fcy":700,"amt":219.352,"hr":14,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100872551","cn":"WAEL SALEH MOHAMED MANSOUR","fee":0.052},{"code":"4104","cur":"USD","fcy":200,"amt":62.72,"hr":14,"pm":"N","nat":"FILIPINO","res":"R","pur":"PERSONAL NEEDS","sid":"310100054563","cn":"MAGIE SAMONTE ECHANO","fee":0},{"code":"1101","cur":"USD","fcy":10000,"amt":3125,"hr":14,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"110200015822","cn":"HAMAD IBRAHEEM HUSSAN ALQATTAN","fee":0},{"code":"5106","cur":"EUR","fcy":10000,"amt":3571.429,"hr":14,"pm":"N","nat":"SERBIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100676653","cn":"ILIJA NISIC","fee":0.001},{"code":"1106","cur":"INR","fcy":6000,"amt":20.25,"hr":14,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110600820491","cn":"ZAKIR HUSSAIN SHAIK","fee":0},{"code":"1101","cur":"USD","fcy":10000,"amt":3127,"hr":14,"pm":"N","nat":"LEBANESE","res":"R","pur":"PERSONAL NEEDS","sid":"110100872558","cn":"FAWAZ A ELSAYED","fee":0},{"code":"3202","cur":"AED","fcy":12000,"amt":1010.472,"hr":15,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320200138795","cn":"SINDHU BABU","fee":0.002},{"code":"5107","cur":"AED","fcy":24500,"amt":2063.047,"hr":15,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600749348","cn":"TALAL MOHAMMAD JABER ALHAJRI","fee":0.003},{"code":"2110","cur":"INR","fcy":3000,"amt":10.002,"hr":15,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"211000872563","cn":"SACHIN SHARMA","fee":0.002},{"code":"3204","cur":"USD","fcy":1000,"amt":312.5,"hr":15,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320200693057","cn":"HOUSIN KOLEF MOHAMMAD","fee":0},{"code":"3102","cur":"USD","fcy":1000,"amt":313.6,"hr":15,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310200215050","cn":"ISMAIL MOHAMED ALI SAYED AHMED","fee":0},{"code":"6101","cur":"USD","fcy":2500,"amt":785,"hr":15,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100840949","cn":"HAMED ABDELMONEM MAAMOUN","fee":0},{"code":"5105","cur":"USD","fcy":956,"amt":299.983,"hr":15,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510500697871","cn":"MOHAMMED S M ALHURAYES","fee":0.017},{"code":"2103","cur":"JOD","fcy":300,"amt":133,"hr":15,"pm":"C","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210200019773","cn":"OMAR HUSNI ABDULRAHMAN ABU","fee":0},{"code":"3101","cur":"USD","fcy":250,"amt":78.188,"hr":15,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400870200","cn":"KHALED KHAMIS BATI","fee":0.008},{"code":"3101","cur":"USD","fcy":2000,"amt":625,"hr":15,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872575","cn":"MAHMOUD A A ELGHAGLA","fee":0},{"code":"6101","cur":"SAR","fcy":1000,"amt":83.5,"hr":15,"pm":"C","nat":"SYRIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100718733","cn":"MOHAMMAD ABDUL RAZAK AL KOUR","fee":0},{"code":"6101","cur":"USD","fcy":3100,"amt":972.749,"hr":15,"pm":"C","nat":"TURKISH","res":"NR","pur":"PERSONAL NEEDS","sid":"610100872173","cn":"MURAT ERDEMLI","fee":0.001},{"code":"6101","cur":"USD","fcy":2300,"amt":721.717,"hr":16,"pm":"C","nat":"TURKISH","res":"NR","pur":"PERSONAL NEEDS","sid":"610100871442","cn":"YUSUF OLKER","fee":0.033},{"code":"3204","cur":"USD","fcy":3200,"amt":1000,"hr":16,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872577","cn":"HOUSSAIN SALEH MOHAMAD","fee":0},{"code":"6101","cur":"USD","fcy":700,"amt":219.1,"hr":16,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"610100173449","cn":"ABOUELKHEIR MOHAMED SOBEIH","fee":0.005},{"code":"6101","cur":"USD","fcy":3000,"amt":942,"hr":16,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100817904","cn":"ABDELSALAM IBRAHIM ABDELSALAM KANDIL","fee":0},{"code":"1101","cur":"USD","fcy":870,"amt":272.093,"hr":16,"pm":"C","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872581","cn":"AHMAD KHALIFA ALDALLO","fee":0.007},{"code":"6101","cur":"SAR","fcy":4000,"amt":334,"hr":16,"pm":"C","nat":"JORDANIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100379858","cn":"ZEYADRIZIK ABEDL RAHMAN ABU AL KAS","fee":0},{"code":"1101","cur":"USD","fcy":8000,"amt":2502,"hr":16,"pm":"N","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872581","cn":"AHMAD KHALIFA ALDALLO","fee":0},{"code":"1101","cur":"USD","fcy":20000,"amt":6255,"hr":16,"pm":"N","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872581","cn":"AHMAD KHALIFA ALDALLO","fee":0},{"code":"5107","cur":"INR","fcy":1500,"amt":5.051,"hr":16,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000323004","cn":"KAFEEL AHMAD VAKIL AHAMAD","fee":0.001},{"code":"1101","cur":"USD","fcy":202,"amt":63.175,"hr":16,"pm":"N","nat":"SYRIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110100872581","cn":"AHMAD KHALIFA ALDALLO","fee":0},{"code":"5101","cur":"SAR","fcy":300,"amt":25,"hr":16,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100383793","cn":"ANAS KUNJUMAKANAKTH","fee":0},{"code":"6101","cur":"SAR","fcy":500,"amt":41.75,"hr":16,"pm":"C","nat":"LEBANESE","res":"NR","pur":"PERSONAL NEEDS","sid":"610100872587","cn":"IBRAHIM AHMED TRAD","fee":0},{"code":"3101","cur":"USD","fcy":400,"amt":125.1,"hr":16,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100137282","cn":"YASSIN MOHAMAD CHIKHANI","fee":0},{"code":"2102","cur":"TRY","fcy":20000,"amt":138,"hr":16,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210200872589","cn":"RAGHAD KHALED HASAN KHABBAZ","fee":0.013},{"code":"2102","cur":"TRY","fcy":29000,"amt":200,"hr":16,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210200872589","cn":"RAGHAD KHALED HASAN KHABBAZ","fee":0.013},{"code":"2102","cur":"TRY","fcy":1625,"amt":11.213,"hr":16,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210200872589","cn":"RAGHAD KHALED HASAN KHABBAZ","fee":0.013},{"code":"1101","cur":"SAR","fcy":1000,"amt":83.45,"hr":16,"pm":"N","nat":"KUWAITI","res":"NR","pur":"TRAVEL EXPENSE","sid":"110100060433","cn":"FAISAL AHMED MOHAMED KHALEFAH","fee":0},{"code":"5112","cur":"INR","fcy":6000,"amt":20,"hr":16,"pm":"N","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"511200649427","cn":"SUGRIV SINGH SHAM SINGH","fee":0},{"code":"3204","cur":"PHP","fcy":33000,"amt":174.24,"hr":17,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872596","cn":"ABDULLAH RASHED MOHAMMAD ALATEL","fee":0},{"code":"6101","cur":"USD","fcy":3100,"amt":973,"hr":17,"pm":"C","nat":"SUDANESE","res":"NR","pur":"PERSONAL NEEDS","sid":"610100872597","cn":"AMAR MOHAMED ALI HUSSEIN","fee":0},{"code":"3204","cur":"USD","fcy":3190,"amt":998.47,"hr":17,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320300803127","cn":"FADI MOHAMMAD ALAJJOUB","fee":0},{"code":"5112","cur":"INR","fcy":6000,"amt":20.202,"hr":17,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"511200775397","cn":"SWAMI SIMHA","fee":0.002},{"code":"2103","cur":"USD","fcy":2000,"amt":626,"hr":17,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210300582652","cn":"ALI AHMED ABDELKERIM MANSOUR","fee":0},{"code":"3204","cur":"USD","fcy":1000,"amt":313,"hr":17,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400575387","cn":"HAKEM MADLOUL ALKHALAF ALHRATA","fee":0},{"code":"3104","cur":"SAR","fcy":1000,"amt":83.45,"hr":17,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310400186976","cn":"HASAN FATHI HASAN ELZAYYADI","fee":0.002},{"code":"2104","cur":"JOD","fcy":700,"amt":311.36,"hr":17,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210400766895","cn":"BASAM MOHAMED CHALABI","fee":0},{"code":"3202","cur":"SAR","fcy":340,"amt":28.373,"hr":17,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100030252","cn":"HANEEFA ANJUKANDY THALAKKAL","fee":0.001},{"code":"3202","cur":"AED","fcy":8000,"amt":673.648,"hr":17,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100030252","cn":"HANEEFA ANJUKANDY THALAKKAL","fee":0.001},{"code":"5104","cur":"SAR","fcy":11000,"amt":915.75,"hr":17,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"999900099213","cn":"KHALED MUBARAK SHAFI ALAJMI","fee":0},{"code":"3202","cur":"SAR","fcy":40,"amt":3.338,"hr":17,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100030252","cn":"HANEEFA ANJUKANDY THALAKKAL","fee":0.008},{"code":"5105","cur":"SAR","fcy":480,"amt":40.056,"hr":17,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510500872604","cn":"JAVED YADAWAD","fee":0.006},{"code":"3204","cur":"BDT","fcy":7000,"amt":19.95,"hr":17,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872606","cn":"AKASH SARDAR MANIK SARDAR","fee":0},{"code":"3101","cur":"PKR","fcy":10000,"amt":13,"hr":17,"pm":"N","nat":"PAKISTANI","res":"R","pur":"PERSONAL NEEDS","sid":"210100105660","cn":"MUHAMMAD MANSHA MUHAMMAD ILYAS","fee":0},{"code":"5101","cur":"SAR","fcy":9610,"amt":800.033,"hr":17,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100872609","cn":"RASHED MOHAMMAD RASHED ALOWAIHAN","fee":0.003},{"code":"1103","cur":"GEL","fcy":500,"amt":62.25,"hr":17,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110300872612","cn":"JOHNS JOSEPH MATTAM","fee":0},{"code":"1103","cur":"USD","fcy":500,"amt":156.5,"hr":17,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110300872612","cn":"JOHNS JOSEPH MATTAM","fee":0},{"code":"5106","cur":"SAR","fcy":20000,"amt":1665.25,"hr":17,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600679016","cn":"AALI MENWER AALI ALAZMI","fee":0},{"code":"5106","cur":"SAR","fcy":7210,"amt":600.25,"hr":17,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600762913","cn":"AHMAD EID AYEDH ALRASHEEDI","fee":0},{"code":"5101","cur":"USD","fcy":3000,"amt":938.25,"hr":17,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100040766","cn":"MERDHI KHALAF HABEEB ALSHAMMARI","fee":0},{"code":"5106","cur":"EGP","fcy":1000,"amt":7.35,"hr":17,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600872617","cn":"RAMADAN EL SAIED GAMALELDIN MOSBAH","fee":0},{"code":"3204","cur":"USD","fcy":2000,"amt":626,"hr":18,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310500697766","cn":"MOHAMAD IBRAHIM ALSALEH","fee":0},{"code":"5106","cur":"CNY","fcy":9200,"amt":433.78,"hr":18,"pm":"C","nat":"CHINESE","res":"R","pur":"PERSONAL NEEDS","sid":"510600872621","cn":"BAN YANG","fee":0},{"code":"5106","cur":"OMR","fcy":2000,"amt":1608.526,"hr":18,"pm":"N","nat":"IRANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600872624","cn":"SHAMIM MOHAMMAD JABERI KHORMOUJI","fee":0.006},{"code":"5104","cur":"USD","fcy":3000,"amt":938.1,"hr":18,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510400863452","cn":"MOHAMED TAHER","fee":0},{"code":"3204","cur":"USD","fcy":3100,"amt":969.99,"hr":18,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872629","cn":"KHALIL A ALSANDARY","fee":0.01},{"code":"3101","cur":"INR","fcy":40000,"amt":134.68,"hr":18,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872632","cn":"MUNADI FAHAD FALAH ALRAJHI","fee":0},{"code":"3204","cur":"USD","fcy":2700,"amt":844.83,"hr":18,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400573962","cn":"HASSAN MHSIN ABED","fee":0},{"code":"6104","cur":"SAR","fcy":1200,"amt":100.008,"hr":18,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610400872636","cn":"HALA MANEA FAHAD ALAJMI","fee":0.008},{"code":"2103","cur":"USD","fcy":700,"amt":219,"hr":18,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210200181232","cn":"MOHAMED BASYOUNY MOHAMED ABOUSALEM","fee":0},{"code":"5106","cur":"BDT","fcy":5000,"amt":14.25,"hr":18,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"510600872640","cn":"MIR A ALI","fee":0},{"code":"5104","cur":"USD","fcy":2200,"amt":687.94,"hr":18,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510400872637","cn":"MOHSEN QRAIM ABDULLAH","fee":0},{"code":"3104","cur":"EGP","fcy":1000,"amt":7.5,"hr":18,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310400872643","cn":"ABDELHAMID GAMEI NAGY ABOUELWAFA","fee":0},{"code":"2102","cur":"USD","fcy":680,"amt":212.84,"hr":18,"pm":"C","nat":"LEBANESE","res":"R","pur":"PERSONAL NEEDS","sid":"210200843420","cn":"GABY HARB","fee":0.04},{"code":"2102","cur":"EUR","fcy":520,"amt":187.2,"hr":18,"pm":"C","nat":"LEBANESE","res":"R","pur":"PERSONAL NEEDS","sid":"210200843420","cn":"GABY HARB","fee":0.04},{"code":"2107","cur":"INR","fcy":10620,"amt":35.758,"hr":18,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210700872645","cn":"KUNJU HASEENA MOHAMMED","fee":0.008},{"code":"4101","cur":"INR","fcy":5050,"amt":17.003,"hr":18,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"410100600160","cn":"RANJAN KUMAR SINGH","fee":0.003},{"code":"3204","cur":"USD","fcy":2850,"amt":892.05,"hr":18,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320200781651","cn":"AHMAD H NASSAR","fee":0},{"code":"6101","cur":"SAR","fcy":345,"amt":28.721,"hr":18,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610100846229","cn":"AMRO MOHAMED ABDELFATTAH HAMED","fee":0.001},{"code":"5101","cur":"BDT","fcy":10000,"amt":28.4,"hr":18,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000236247","cn":"ALAUDDIN BHUIYAN BAZLUR RAHMAN","fee":0},{"code":"5106","cur":"SAR","fcy":12010,"amt":1000,"hr":18,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600868446","cn":"KHAMEES MOHAMMAD FALEH ALAJMI","fee":0},{"code":"3204","cur":"JOD","fcy":2250,"amt":1000.8,"hr":18,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400861344","cn":"MESHAL SAUD HUMOUD ALDUWAILAH","fee":0},{"code":"6103","cur":"INR","fcy":9000,"amt":30.303,"hr":18,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000540871","cn":"ABUL KALAM GAFAR SEIKH","fee":0.003},{"code":"5106","cur":"SAR","fcy":12010,"amt":1000,"hr":18,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600868453","cn":"FAHAD ABDULLAH ONAIZAN ALAJMI","fee":0},{"code":"5107","cur":"SAR","fcy":50,"amt":4.172,"hr":18,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510400618666","cn":"MOHAMED RABIE MOHAMED ABDALLA","fee":0.008},{"code":"3101","cur":"SAR","fcy":12010,"amt":999.833,"hr":18,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872652","cn":"SAUD SULTAN SAAD ALMUTAIRI","fee":0.002},{"code":"1106","cur":"INR","fcy":6000,"amt":20.25,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"110600872660","cn":"BASHEERUNNISBEGUM SHEK","fee":0},{"code":"1101","cur":"INR","fcy":5000,"amt":16.75,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100872661","cn":"QAMAR AHMAD","fee":0},{"code":"4102","cur":"USD","fcy":500,"amt":156.8,"hr":19,"pm":"N","nat":"IRAQI","res":"R","pur":"PERSONAL NEEDS","sid":"410200872662","cn":"WALEED GHENI HUSSEIN HUSSEIN","fee":0},{"code":"2102","cur":"INR","fcy":6000,"amt":20.202,"hr":19,"pm":"C","nat":"BHUTANESE","res":"R","pur":"PERSONAL NEEDS","sid":"210200772120","cn":"PADAM BDR GHALLEY","fee":0.002},{"code":"3204","cur":"SAR","fcy":1500,"amt":124.95,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"130100810383","cn":"IBRAHIM POVVAL ABDULLA ABDULLA","fee":0},{"code":"4101","cur":"INR","fcy":3000,"amt":10.101,"hr":19,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510300037879","cn":"SAFIULLAH ANSARI","fee":0.001},{"code":"1106","cur":"PHP","fcy":6000,"amt":31.8,"hr":19,"pm":"C","nat":"FILIPINO","res":"R","pur":"TRAVEL EXPENSE","sid":"110600861662","cn":"DONALY TIMBREZA DIEGO","fee":0},{"code":"1101","cur":"INR","fcy":10010,"amt":34.034,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"110100364195","cn":"ANWAR HUSAIN","fee":0.016},{"code":"2103","cur":"EUR","fcy":1400,"amt":505.4,"hr":19,"pm":"N","nat":"UKRAINIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000256327","cn":"YULIIA YUNICHENKO","fee":0},{"code":"2103","cur":"USD","fcy":1550,"amt":485.15,"hr":19,"pm":"N","nat":"UKRAINIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000256327","cn":"YULIIA YUNICHENKO","fee":0},{"code":"3101","cur":"USD","fcy":9500,"amt":2971.125,"hr":19,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872668","cn":"FOUAD KHALAIF ALDAKHIL","fee":0},{"code":"3204","cur":"BDT","fcy":10000,"amt":28.5,"hr":19,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000259278","cn":"SHAFIQUR RAHMAN AMAN ULLAH","fee":0},{"code":"5106","cur":"THB","fcy":20000,"amt":189,"hr":19,"pm":"C","nat":"SOMALI","res":"R","pur":"PERSONAL NEEDS","sid":"310200213699","cn":"IBRAHIM ABDULKADIR YUSUF MOHAMED","fee":0},{"code":"3105","cur":"USD","fcy":300,"amt":93.975,"hr":19,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310500872673","cn":"AHMED MAHMOUD SELEEM SHEHATA","fee":0},{"code":"6104","cur":"SAR","fcy":12005,"amt":1000.004,"hr":19,"pm":"C","nat":"SAUDI ARABIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"610400872679","cn":"THAAR AJAB A ALRASHDI","fee":0.004},{"code":"6104","cur":"SAR","fcy":11695,"amt":974.194,"hr":19,"pm":"C","nat":"SAUDI ARABIAN","res":"NR","pur":"TRAVEL EXPENSE","sid":"610400872683","cn":"BAKHIT AJAIB A ALRASHIDI","fee":0.004},{"code":"3101","cur":"CHF","fcy":1520,"amt":600,"hr":19,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872687","cn":"MUBARAK ABDULLAH FAHAD ALMUJAWEB","fee":0},{"code":"3101","cur":"SAR","fcy":600,"amt":49.98,"hr":19,"pm":"N","nat":"NEPALESE","res":"R","pur":"PERSONAL NEEDS","sid":"310100872686","cn":"SARUKH KHAN SEKH","fee":0},{"code":"5106","cur":"SAR","fcy":600,"amt":50,"hr":19,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600872688","cn":"MOHAMED AHMED MOHAMED MOHAMED","fee":0},{"code":"1106","cur":"THB","fcy":42200,"amt":400,"hr":19,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"110600872684","cn":"HAMAD KHALED AHMAD ALQADHI","fee":0},{"code":"2103","cur":"USD","fcy":1200,"amt":376.2,"hr":19,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210300872692","cn":"ADONIS BAHAA SALAMEH","fee":0},{"code":"5101","cur":"INR","fcy":21000,"amt":70.946,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100862792","cn":"OSIM AKRAM KHAN","fee":0.004},{"code":"3101","cur":"USD","fcy":50,"amt":15.65,"hr":19,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872694","cn":"KHALIL IBRAHIM ALSULAIMAN","fee":0},{"code":"3204","cur":"BDT","fcy":10000,"amt":28.5,"hr":19,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000311044","cn":"MD SHARIF BACHCHU","fee":0},{"code":"5106","cur":"CHF","fcy":1000,"amt":389.5,"hr":19,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100679425","cn":"SANAD NAYEF NEGHAIMESH","fee":0},{"code":"5106","cur":"EUR","fcy":1000,"amt":357.5,"hr":19,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100679425","cn":"SANAD NAYEF NEGHAIMESH","fee":0},{"code":"5107","cur":"USD","fcy":9500,"amt":2968.75,"hr":19,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510700704186","cn":"AYMAN MOHAMMAD CHIHADAT","fee":0},{"code":"1106","cur":"INR","fcy":14500,"amt":49.3,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000232827","cn":"KOMMA SANKARAIAH","fee":0},{"code":"3204","cur":"USD","fcy":5000,"amt":1564.25,"hr":19,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872697","cn":"MUHDEY DAWOUD ALHAJH HUSSEN","fee":0},{"code":"5107","cur":"INR","fcy":6000,"amt":20,"hr":19,"pm":"C","nat":"INDIAN","res":"R","pur":"TRAVEL EXPENSE","sid":"510100075475","cn":"MOHAMMAD HANIF KARIMULLAH","fee":0},{"code":"1106","cur":"THB","fcy":33550,"amt":318.009,"hr":19,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"110600872684","cn":"HAMAD KHALED AHMAD ALQADHI","fee":0.009},{"code":"3204","cur":"USD","fcy":9000,"amt":2816.1,"hr":20,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400799225","cn":"AHMAD SWADI ALESSA","fee":0},{"code":"3204","cur":"SAR","fcy":12000,"amt":999.6,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"999900210327","cn":"ANWER HAMAD ABDULLAH ALSHARRAH","fee":0},{"code":"5106","cur":"USD","fcy":3200,"amt":1000,"hr":20,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100679425","cn":"SANAD NAYEF NEGHAIMESH","fee":0},{"code":"3101","cur":"EGP","fcy":3000,"amt":21.75,"hr":20,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872709","cn":"AZZA MAHMOUD HASSAN ALY","fee":0},{"code":"3101","cur":"USD","fcy":2000,"amt":623.5,"hr":20,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872708","cn":"MOHAMED REDA MOHAMED ELMOGHAZY","fee":0},{"code":"3101","cur":"EGP","fcy":5000,"amt":35.5,"hr":20,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872708","cn":"MOHAMED REDA MOHAMED ELMOGHAZY","fee":0},{"code":"5106","cur":"JOD","fcy":850,"amt":378.25,"hr":20,"pm":"N","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600709534","cn":"SAID O A S SALEM","fee":0},{"code":"5106","cur":"SAR","fcy":400,"amt":33.3,"hr":20,"pm":"N","nat":"JORDANIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600709534","cn":"SAID O A S SALEM","fee":0},{"code":"2101","cur":"INR","fcy":17500,"amt":60.375,"hr":20,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100180700","cn":"SAHIL ZAMAN KHAN","fee":0.005},{"code":"5106","cur":"USD","fcy":5100,"amt":1593.75,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600663786","cn":"FARES MOHAMMAD ABDULLAH ALMUTAIRI","fee":0.003},{"code":"5106","cur":"THB","fcy":11000,"amt":104.753,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510600663786","cn":"FARES MOHAMMAD ABDULLAH ALMUTAIRI","fee":0.003},{"code":"2104","cur":"USD","fcy":100,"amt":31.5,"hr":20,"pm":"C","nat":"ALGERIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210400872715","cn":"RAID CHAMS EDDINE CHEGAAR","fee":0},{"code":"1101","cur":"AED","fcy":11700,"amt":985.21,"hr":20,"pm":"C","nat":"INDIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"110100129611","cn":"NARAYAN DASS DHALUMAL","fee":0},{"code":"6102","cur":"USD","fcy":1000,"amt":313.6,"hr":20,"pm":"C","nat":"AFGHAN","res":"R","pur":"PERSONAL NEEDS","sid":"610200872714","cn":"ABDUL WAKIL DAHOUR","fee":0},{"code":"3204","cur":"GBP","fcy":2375,"amt":998.688,"hr":20,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400872719","cn":"SHINY KUNNITHARAYIL KOSHY","fee":0.008},{"code":"3203","cur":"EGP","fcy":500,"amt":3.7,"hr":20,"pm":"C","nat":"EGYPTIAN","res":"NR","pur":"PERSONAL NEEDS","sid":"320300872667","cn":"OMAR ALSAYED AHMED ABDALLA","fee":0},{"code":"5106","cur":"EUR","fcy":300,"amt":107.25,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100388713","cn":"RIMIAH BAAJAN KHADRAN AL MUTAIRI","fee":0},{"code":"5106","cur":"PLN","fcy":1000,"amt":87.6,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510100388713","cn":"RIMIAH BAAJAN KHADRAN AL MUTAIRI","fee":0},{"code":"3204","cur":"AED","fcy":1400,"amt":117.888,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210100108782","cn":"AADLAH RASHED SAEED","fee":0.008},{"code":"6103","cur":"INR","fcy":3000,"amt":10.101,"hr":20,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000290360","cn":"ABDUL SAMAD ABDUL RAHMAN","fee":0.001},{"code":"5106","cur":"SAR","fcy":2160,"amt":180,"hr":20,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510600872728","cn":"SADATH  ALI BASHA SAB","fee":0},{"code":"3204","cur":"AED","fcy":1300,"amt":109.468,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"210100108782","cn":"AADLAH RASHED SAEED","fee":0.008},{"code":"6102","cur":"USD","fcy":450,"amt":141.12,"hr":20,"pm":"C","nat":"AFGHAN","res":"R","pur":"PERSONAL NEEDS","sid":"610200872714","cn":"ABDUL WAKIL DAHOUR","fee":0},{"code":"4101","cur":"USD","fcy":100,"amt":31.37,"hr":20,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100353518","cn":"IBRAHIM ISMAIL ALCHAFI","fee":0},{"code":"5101","cur":"TRY","fcy":14600,"amt":100.01,"hr":20,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"510100787674","cn":"ABBAS ALI BAKIR HUSAIN","fee":0},{"code":"5101","cur":"USD","fcy":3000,"amt":937.5,"hr":20,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100162805","cn":"MOHAMMAD  ADNAN M ABUKHARROUB","fee":0},{"code":"2101","cur":"USD","fcy":100,"amt":31.5,"hr":20,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100020701","cn":"BOULES FARAGALLA SAAD FARAGALLA","fee":0},{"code":"3204","cur":"USD","fcy":2000,"amt":625.7,"hr":20,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"320400714932","cn":"THABET EBID RAJO","fee":0},{"code":"3101","cur":"SAR","fcy":480,"amt":39.96,"hr":20,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310400823933","cn":"SHOUKATHALI KOTTUVALA SAIDALI","fee":0.01},{"code":"5107","cur":"THB","fcy":4000,"amt":38,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510700872737","cn":"AHMAD ALI ALOUSH ALMUTAIRI","fee":0},{"code":"5107","cur":"USD","fcy":2100,"amt":656.25,"hr":20,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"510700872737","cn":"AHMAD ALI ALOUSH ALMUTAIRI","fee":0},{"code":"3204","cur":"NPR","fcy":50000,"amt":119.5,"hr":20,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872740","cn":"MANEEFAH HASHOUSH KHAZAAL ALKHALDI","fee":0},{"code":"3204","cur":"SAR","fcy":1200,"amt":99.9,"hr":20,"pm":"C","nat":"PAKISTANI","res":"R","pur":"PERSONAL NEEDS","sid":"99990000265090","cn":"JAVED MUHAMMAD ALI SIDDIQUE","fee":0},{"code":"6104","cur":"AED","fcy":6000,"amt":505.236,"hr":21,"pm":"C","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"610400872746","cn":"EBTESAM TRAIHEEB ABDULMOHSEN","fee":0.004},{"code":"3204","cur":"SAR","fcy":10205,"amt":850.005,"hr":21,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"320400872298","cn":"MESHAL M F ALOTAIBI","fee":0},{"code":"2110","cur":"USD","fcy":159,"amt":49.862,"hr":21,"pm":"C","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"211000872748","cn":"EVEEN ADNAN SUBEH","fee":0.002},{"code":"3204","cur":"USD","fcy":5000,"amt":1565,"hr":21,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100360286","cn":"IHMOUD IZGHERI ALDHASH","fee":0},{"code":"2110","cur":"EUR","fcy":5500,"amt":1978.075,"hr":21,"pm":"N","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210200340550","cn":"DANVIE ADELINA D SOUZA E VAZ","fee":0},{"code":"3101","cur":"USD","fcy":5000,"amt":1563.75,"hr":21,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"99990000302105","cn":"ABDULLAH MOHAMMAD ABO RASHID","fee":0},{"code":"2107","cur":"USD","fcy":200,"amt":63.1,"hr":21,"pm":"N","nat":"SYRIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210700760341","cn":"MANIA AROIAN","fee":0},{"code":"2110","cur":"BDT","fcy":5000,"amt":14.25,"hr":21,"pm":"C","nat":"BANGLADESHI","res":"R","pur":"PERSONAL NEEDS","sid":"211000872753","cn":"ALAM DULAL PRADHANIA","fee":0},{"code":"1103","cur":"AED","fcy":10000,"amt":842.06,"hr":21,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"110300872754","cn":"ABDULLAH MOHAMMAD OMAR DERBAS ALOMAR","fee":0},{"code":"2104","cur":"USD","fcy":100,"amt":31.5,"hr":21,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"210100109766","cn":"EMAD AWNY ABDELSAYED WAHBA","fee":0},{"code":"2110","cur":"TRY","fcy":10000,"amt":69.75,"hr":21,"pm":"C","nat":"INDIAN","res":"R","pur":"PERSONAL NEEDS","sid":"211000872760","cn":"IMRAN SHAFI KAZI","fee":0},{"code":"5109","cur":"SAR","fcy":1000,"amt":83.45,"hr":21,"pm":"N","nat":"SUDANESE","res":"R","pur":"PERSONAL NEEDS","sid":"510300204691","cn":"YOUSIF MOHAMED YOUSIF KHALIL","fee":0.003},{"code":"5109","cur":"AED","fcy":790,"amt":66.523,"hr":21,"pm":"N","nat":"SUDANESE","res":"R","pur":"PERSONAL NEEDS","sid":"510300204691","cn":"YOUSIF MOHAMED YOUSIF KHALIL","fee":0.003},{"code":"3101","cur":"USD","fcy":3530,"amt":1104.008,"hr":21,"pm":"N","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872763","cn":"SOBHY SAAD ABDALLA SOROUR","fee":0.008},{"code":"3101","cur":"EUR","fcy":3060,"amt":1100,"hr":22,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100872771","cn":"ABDULLAH SALEH ABDULLH ALMUTAIRI","fee":0},{"code":"3101","cur":"EGP","fcy":2800,"amt":21,"hr":22,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872772","cn":"ZEIAD FATHY ABDELMONEM","fee":0.004},{"code":"3101","cur":"TRY","fcy":715,"amt":5.004,"hr":22,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872772","cn":"ZEIAD FATHY ABDELMONEM","fee":0.004},{"code":"3101","cur":"USD","fcy":1800,"amt":562.95,"hr":22,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100872772","cn":"ZEIAD FATHY ABDELMONEM","fee":0.004},{"code":"3101","cur":"USD","fcy":1200,"amt":375.3,"hr":22,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100082512","cn":"JASSIM MOHAMMAD ISMAEIL ALTEMEEMI","fee":0},{"code":"3101","cur":"TRY","fcy":20000,"amt":138,"hr":22,"pm":"N","nat":"KUWAITI","res":"NR","pur":"PERSONAL NEEDS","sid":"310100082512","cn":"JASSIM MOHAMMAD ISMAEIL ALTEMEEMI","fee":0},{"code":"3101","cur":"USD","fcy":1000,"amt":312.5,"hr":22,"pm":"C","nat":"EGYPTIAN","res":"R","pur":"PERSONAL NEEDS","sid":"310100180343","cn":"HUSSEIN MOHAMED EID ELSAYED","fee":0}]
-</script>
 <script>
-const DATA = JSON.parse(document.getElementById('txn-data').textContent);
+/* =====================================================================
+   DATA LOADING
+   ===================================================================== */
+const CSV_FILES = {
+  becHo2025: 'data/bec-2025.csv',
+  becHo2026: 'data/bec-2026.csv',
+  becBr2025: 'data/bec-branches-2025.csv',
+  becBr2026: 'data/bec-branches-2026.csv',
+  ansari2026: 'data/ansari-2026.csv',
+  ansariGP: 'data/ansari-gross-profit-manual.csv'
+};
 
-const PALETTE = [
-  '#3A7AFE','#10CA93','#00AFEF','#7C5CFC','#FF5C5C','#FFB020','#22335E','#5B8FBF',
-  '#0B5ED7','#0FE0A8','#36C5F0','#9C7BFF','#FF8A5C','#E6A64D','#3D5A80','#6BC5C0'
-];
+function fetchCSV(path){
+  return new Promise((resolve, reject) => {
+    Papa.parse(path, {
+      download: true,
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: (err) => reject(new Error(path + ': ' + err))
+    });
+  });
+}
 
-const REAL_DATE_LABEL = '21 Jul 2026';
-const TODAY_DAY_OF_MONTH = 21;   // Jul 21 — day of month for MTD scaling
-const MONTHS_ELAPSED_YTD = 7;    // Jan-Jul, with Jul partial (MTD)
-const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul'];
-const HO_CODE = '9999';
-
-// ---- Branch / Area reference data (as provided) ----
+const HO_CODE_BY_ENTITY = { bec: 'WSL', ansari: '9999' };
 const AREA_LIST = ['SHABIR AREA', 'SAKEER AREA', 'ANOOP AREA'];
-const BRANCH_META = {
+const ANSARI_BRANCH_META = {
   '1106': { name: 'Maliya UTC',        area: 'SHABIR AREA' },
   '2110': { name: 'Al Salam Mall',     area: 'SHABIR AREA' },
   '1101': { name: 'Main Branch',       area: 'SHABIR AREA' },
@@ -382,144 +425,288 @@ const BRANCH_META = {
   '6102': { name: 'Jahra',             area: 'ANOOP AREA' },
   '6103': { name: 'Abdali',            area: 'ANOOP AREA' },
   '6104': { name: 'Jahra 2',           area: 'ANOOP AREA' },
-  '6105': { name: 'Abdali 2',          area: 'ANOOP AREA' },
-  '9999': { name: 'Head Office',       area: null }
+  '6105': { name: 'Abdali 2',          area: 'ANOOP AREA' }
 };
 
-function hashSeed(str){ let h = 0; for (let i=0;i<str.length;i++) h = (h*31 + str.charCodeAt(i)) | 0; return h; }
-function seededRandom(seed){
-  let t = seed;
-  return function(){
-    t |= 0; t = (t + 0x6D2B79F5) | 0;
-    let r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+let DATA = [];               // unified real transaction rows
+let ANSARI_MONTHLY_GP = {};  // 'YYYY-MM' -> number|null
+let BEC_BRANCH_LIST = [];    // [{code,name}]
+let CUR_LIST_BY_ENTITY = { bec: [], ansari: [] };
+
+function normalizeBecRow(row, isHO){
+  if (!row.date || !row.type) return null;
+  return {
+    date: row.date, entity: 'bec', code: isHO ? 'WSL' : row.branch_code,
+    isHO, type: String(row.type).toLowerCase(),
+    cur: row.currency, amt: Number(row.volume_kwd) || 0,
+    profit: Number(row.gross_profit_kwd) || 0
   };
 }
-function synthMultiplier(seedStr, base, spread){
-  const rand = seededRandom(hashSeed(seedStr));
-  return base + (rand() * 2 - 1) * spread;
+
+function normalizeAnsariRow(row){
+  if (!row.date || !row.branch_code) return null;
+  const code = String(row.branch_code);
+  return {
+    date: row.date, entity: 'ansari', code,
+    isHO: code === '9999', type: 'sell',
+    cur: row.currency, amt: Number(row.volume_kwd) || 0,
+    profit: null // filled in from monthly manual file at aggregation time
+  };
 }
-function fmtCurrency(v){
-  return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+async function loadAll(){
+  try {
+    const [becHo25, becHo26, becBr25, becBr26, ansari26, ansariGP] = await Promise.all([
+      fetchCSV(CSV_FILES.becHo2025), fetchCSV(CSV_FILES.becHo2026),
+      fetchCSV(CSV_FILES.becBr2025), fetchCSV(CSV_FILES.becBr2026),
+      fetchCSV(CSV_FILES.ansari2026), fetchCSV(CSV_FILES.ansariGP)
+    ]);
+
+    const rows = [];
+    becHo25.forEach(r => { const n = normalizeBecRow(r, true); if (n) rows.push(n); });
+    becHo26.forEach(r => { const n = normalizeBecRow(r, true); if (n) rows.push(n); });
+    becBr25.forEach(r => { const n = normalizeBecRow(r, false); if (n) rows.push(n); });
+    becBr26.forEach(r => { const n = normalizeBecRow(r, false); if (n) rows.push(n); });
+    ansari26.forEach(r => { const n = normalizeAnsariRow(r); if (n) rows.push(n); });
+    DATA = rows;
+
+    ansariGP.forEach(r => {
+      if (!r.month) return;
+      const v = r.gross_profit_kwd;
+      ANSARI_MONTHLY_GP[String(r.month)] = (v === '' || v === null || v === undefined) ? null : Number(v);
+    });
+
+    const becCodes = new Set();
+    DATA.forEach(r => { if (r.entity === 'bec' && !r.isHO) becCodes.add(r.code); });
+    BEC_BRANCH_LIST = [...becCodes].sort().map(code => ({ code, name: code }));
+
+    ['bec','ansari'].forEach(ent => {
+      CUR_LIST_BY_ENTITY[ent] = [...new Set(DATA.filter(r => r.entity === ent).map(r => r.cur))]
+        .sort((a,b) => {
+          const va = DATA.filter(r => r.entity===ent && r.cur===a).reduce((s,r)=>s+r.amt,0);
+          const vb = DATA.filter(r => r.entity===ent && r.cur===b).reduce((s,r)=>s+r.amt,0);
+          return vb - va;
+        });
+    });
+
+    document.getElementById('loadScreen').style.display = 'none';
+    document.getElementById('dashboardRoot').style.display = '';
+    renderAll();
+  } catch (err) {
+    document.getElementById('loadScreen').style.display = 'none';
+    const el = document.getElementById('errorScreen');
+    el.style.display = '';
+    el.innerHTML = `<div class="error-box">
+      <b>Couldn't load the data files.</b><br><br>
+      ${err.message}<br><br>
+      Make sure this HTML file is served over http(s) (e.g. GitHub Pages) — opening it
+      directly as a local file won't work due to browser security restrictions — and that
+      a <code>data/</code> folder with the CSV files sits next to this file.
+    </div>`;
+  }
 }
+
+/* =====================================================================
+   HELPERS
+   ===================================================================== */
+function fmtCurrency(v){ return v.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtPct(n){
   if (n === null || n === undefined || isNaN(n)) return 'N/A';
   const sign = n > 0 ? '+' : '';
   return sign + n.toFixed(1) + '%';
 }
-function branchName(code){ return (BRANCH_META[code] || {}).name || code; }
-
-// ---- Branch list (excludes Head Office), sorted by real volume desc ----
-const branchList = Object.keys(BRANCH_META).filter(c => c !== HO_CODE).map(code => {
-  const vol = DATA.filter(r => r.code === code).reduce((a,r) => a + r.amt, 0);
-  return { code, name: BRANCH_META[code].name, area: BRANCH_META[code].area, realVol: vol };
-}).sort((a,b) => b.realVol - a.realVol);
-
-const currencyList = [...new Set(DATA.map(r => r.cur))].sort((a,b) => {
-  const va = DATA.filter(r => r.cur === a).reduce((s,r) => s + r.amt, 0);
-  const vb = DATA.filter(r => r.cur === b).reduce((s,r) => s + r.amt, 0);
-  return vb - va;
-});
-
-const METRIC_META = {
-  amt:    { label: 'Volume (KWD)',     fmt: v => fmtCurrency(v) },
-  count:  { label: 'Transactions',     fmt: v => Math.round(v).toLocaleString() },
-  active: { label: 'Active Customers', fmt: v => Math.round(v).toLocaleString() }
-};
-// Branch comparison panel doesn't need Active Customers per branch.
-const BRANCH_METRIC_META = {
-  amt:    METRIC_META.amt,
-  count:  METRIC_META.count
-};
-
-let currentTab = 'mtd';   // 'mtd' | 'ytd'  ("today" single-date view removed)
-let entityScope = 'ansari'; // 'bec' | 'ansari' | 'consolidated'
-
-// BEC has no real data in the uploaded report, so its whole scale is
-// simulated as a fraction of Ansari's real figures — chosen once, fixed,
-// so the relationship between the two entities stays consistent everywhere.
-const BEC_FACTOR = 0.42;
-
-function entityMultFor(entity){ return entity === 'bec' ? BEC_FACTOR : 1; }
-
-function aggregateReal(records){
-  const sids = new Set();
-  let amt = 0, cash = 0, noncash = 0;
-  records.forEach(r => {
-    amt += r.amt;
-    sids.add(r.sid);
-    if (r.pm === 'C') cash += r.amt; else noncash += r.amt;
-  });
-  return { amt, count: records.length, active: sids.size, cash, noncash };
+function branchNameFor(entity, code){
+  if (entity === 'ansari') return (ANSARI_BRANCH_META[code] || {}).name || code;
+  return code;
 }
-
-// Generic scaled aggregator: real records for a given scope, scaled to the
-// selected period by a deterministic seeded multiplier so results stay
-// stable across re-renders. `seedKey` should uniquely identify the scope.
-// Entity-aware: BEC has no real data, so its baseline is Ansari's real
-// figures scaled by BEC_FACTOR before the period multiplier is applied;
-// Consolidated sums the Ansari and BEC results.
-function aggregateScopeForEntity(records, seedKey, period, entity){
-  const real = aggregateReal(records);
-  const eMult = entityMultFor(entity);
-  const adjReal = {
-    amt: real.amt * eMult, count: Math.round(real.count * eMult),
-    active: Math.round(real.active * Math.sqrt(eMult)),
-    cash: real.cash * eMult, noncash: real.noncash * eMult
-  };
-  if (period === 'today') return adjReal;
-  const baseMult = period === 'mtd' ? TODAY_DAY_OF_MONTH : (TODAY_DAY_OF_MONTH + (MONTHS_ELAPSED_YTD - 1) * 22);
-  const seed = entity + '|' + seedKey;
-  const mult = synthMultiplier(seed + '|' + period, baseMult, baseMult * 0.28);
-  const countMult = mult * synthMultiplier(seed + '|' + period + '|countAdj', 1, 0.1);
-  const activeMult = Math.sqrt(mult) * synthMultiplier(seed + '|' + period + '|active', 1, 0.15);
-  return {
-    amt: Math.max(adjReal.amt * mult, adjReal.amt),
-    count: Math.max(Math.round(adjReal.count * countMult), adjReal.count),
-    active: Math.max(Math.round(adjReal.active * activeMult), adjReal.active),
-    cash: adjReal.amt > 0 ? adjReal.cash * mult : 0,
-    noncash: adjReal.amt > 0 ? adjReal.noncash * mult : 0
-  };
+function branchAreaFor(entity, code){
+  if (entity === 'ansari') return (ANSARI_BRANCH_META[code] || {}).area || null;
+  return null;
 }
-
-function combineAggs(a, b){
-  return { amt: a.amt+b.amt, count: a.count+b.count, active: a.active+b.active, cash: (a.cash||0)+(b.cash||0), noncash: (a.noncash||0)+(b.noncash||0) };
+function branchListFor(entity){
+  if (entity === 'ansari') {
+    return Object.keys(ANSARI_BRANCH_META).filter(c => c !== '9999')
+      .map(code => ({ code, name: ANSARI_BRANCH_META[code].name, area: ANSARI_BRANCH_META[code].area }));
+  }
+  return BEC_BRANCH_LIST.map(b => ({ code: b.code, name: b.name, area: null }));
 }
+function entityHasAreas(entity){ return entity === 'ansari'; }
+function entityHasBuy(entity){ return entity === 'bec'; }
 
-function aggregateScope(records, seedKey, period){
-  return aggregateScopeForEntity(records, seedKey, period, entityScope);
-}
-
-// Comparison-period aggregator (prior month / prior year), scaled to the
-// same "days elapsed" basis as the current period so the % change is a
-// fair like-for-like comparison. Simulated, deterministic per seed.
-function comparisonAggForEntity(records, seedKey, baseMult, entity){
-  const real = aggregateReal(records);
-  const eMult = entityMultFor(entity);
-  const adjReal = { amt: real.amt * eMult, count: Math.round(real.count * eMult), active: Math.round(real.active * Math.sqrt(eMult)) };
-  const seed = entity + '|' + seedKey;
-  const mult = synthMultiplier(seed, baseMult, baseMult * 0.28);
-  const countMult = mult * synthMultiplier(seed + '|countAdj', 1, 0.1);
-  const activeMult = Math.sqrt(mult) * synthMultiplier(seed + '|active', 1, 0.15);
-  return {
-    amt: adjReal.amt * mult,
-    count: Math.round(adjReal.count * countMult),
-    active: Math.round(adjReal.active * activeMult)
-  };
-}
-
-function comparisonAgg(records, seedKey, baseMult){
-  return comparisonAggForEntity(records, seedKey, baseMult, entityScope);
-}
-
-function codesForAreaFilter(filter){
-  // filter: 'ALL' | area name | branch code
-  if (filter === 'ALL') return branchList.map(b => b.code);
-  if (AREA_LIST.includes(filter)) return branchList.filter(b => b.area === filter).map(b => b.code);
+function codesForAreaFilter(entity, filter){
+  const list = branchListFor(entity);
+  if (filter === 'ALL') return list.map(b => b.code);
+  if (AREA_LIST.includes(filter)) return list.filter(b => b.area === filter).map(b => b.code);
   return [filter];
 }
-/* ---------- Entity Tabs (BEC / Ansari / Consolidated) ---------- */
+
+const METRIC_META = {
+  amt:    { label: 'Volume (KWD)',       fmt: v => fmtCurrency(v) },
+  count:  { label: 'Transactions',       fmt: v => Math.round(v).toLocaleString() },
+  profit: { label: 'Gross Profit (KWD)', fmt: v => (v === null ? 'N/A' : fmtCurrency(v)) }
+};
+
+// Ansari has no real per-transaction profit and only a monthly manual
+// aggregate, so per-currency/per-branch/per-day Gross Profit breakdowns
+// aren't meaningful for Ansari — only offer it as a metric for BEC.
+function metricOptionsFor(entity){
+  return entity === 'bec'
+    ? [['amt','Volume'], ['count','Transactions'], ['profit','Gross Profit']]
+    : [['amt','Volume'], ['count','Transactions']];
+}
+
+/* Latest date present for an entity's current (2026) data. */
+function latestDateFor(entity){
+  let max = null;
+  DATA.forEach(r => {
+    if (r.entity !== entity) return;
+    if (r.date.slice(0,4) !== '2026') return;
+    if (max === null || r.date > max) max = r.date;
+  });
+  return max;
+}
+
+function daysInMonth(y, m){ return new Date(y, m, 0).getDate(); } // m is 1-12
+
+function monthKey(y, m){ return y + '-' + String(m).padStart(2,'0'); }
+
+/* period: 'mtd' | 'ytd' -> { start: 'YYYY-MM-DD', end: 'YYYY-MM-DD' } based on the
+   entity's own latest available date. */
+function periodRange(entity, period){
+  const today = latestDateFor(entity);
+  if (!today) return null;
+  const [y, m, d] = today.split('-').map(Number);
+  if (period === 'mtd') return { start: monthKey(y,m) + '-01', end: today };
+  return { start: y + '-01-01', end: today };
+}
+
+function prevMonthRange(entity){
+  const today = latestDateFor(entity);
+  if (!today) return null;
+  let [y, m] = today.split('-').map(Number);
+  m -= 1; if (m === 0){ m = 12; y -= 1; }
+  return { start: monthKey(y,m) + '-01', end: monthKey(y,m) + '-' + String(daysInMonth(y,m)).padStart(2,'0') };
+}
+
+function prevYearSameRange(entity, period){
+  const range = periodRange(entity, period);
+  if (!range) return null;
+  const shift = s => { const [y,m,d] = s.split('-').map(Number); return (y-1) + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0'); };
+  return { start: shift(range.start), end: shift(range.end) };
+}
+
+function filterRows(rows, { entity, codes, cur, types, start, end }){
+  return rows.filter(r => {
+    if (entity && r.entity !== entity) return false;
+    if (codes && !codes.includes(r.code)) return false;
+    if (cur && r.cur !== cur) return false;
+    if (types && !types.includes(r.type)) return false;
+    if (start && r.date < start) return false;
+    if (end && r.date > end) return false;
+    return true;
+  });
+}
+
+/* Real aggregate: amt, count. Profit handled per-entity (BEC = real sum,
+   Ansari = looked up from the manual monthly file, prorated for partial
+   months, flagged "partial" if any overlapped month hasn't been entered). */
+function realAgg(rows){
+  let amt = 0, count = 0, profit = 0;
+  rows.forEach(r => { amt += r.amt; count++; if (r.entity === 'bec') profit += (r.profit || 0); });
+  return { amt, count, profit };
+}
+
+function ansariGrossProfitForRange(start, end){
+  if (!start || !end) return { value: null, partial: true };
+  let total = 0, any = false, partial = false;
+  let [y, m] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  while (y < ey || (y === ey && m <= em)) {
+    const key = monthKey(y, m);
+    const dim = daysInMonth(y, m);
+    const rangeStartDay = (y === Number(start.split('-')[0]) && m === Number(start.split('-')[1])) ? Number(start.split('-')[2]) : 1;
+    const rangeEndDay = (y === ey && m === em) ? Number(end.split('-')[2]) : dim;
+    const overlapDays = rangeEndDay - rangeStartDay + 1;
+    const val = ANSARI_MONTHLY_GP[key];
+    if (val === null || val === undefined) {
+      partial = true;
+    } else {
+      any = true;
+      total += val * (overlapDays / dim);
+    }
+    m++; if (m > 12){ m = 1; y++; }
+  }
+  return { value: any ? total : null, partial };
+}
+
+function aggregateForEntity(entity, { codes, cur, types, start, end }){
+  const rows = filterRows(DATA, { entity, codes, cur, types, start, end });
+  const agg = realAgg(rows);
+  if (entity === 'ansari') {
+    const gp = ansariGrossProfitForRange(start, end);
+    agg.profit = gp.value;
+    agg.profitPartial = gp.partial;
+  }
+  return agg;
+}
+
+function pctChangeOrNA(cur, prev){
+  if (cur === null || prev === null || prev === undefined || cur === undefined) return null;
+  if (!prev) return null;
+  return (cur - prev) / prev * 100;
+}
+
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function dailySeries(rows, start, end){
+  const idx = {};
+  rows.forEach(r => { (idx[r.date] = idx[r.date] || []).push(r); });
+  const out = [];
+  let [y, m, d] = start.split('-').map(Number);
+  while (true){
+    const ds = y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    const agg = realAgg(idx[ds] || []);
+    out.push({ label: m + '/' + d, date: ds, amt: agg.amt, count: agg.count, profit: agg.profit });
+    if (ds === end) break;
+    d++; const dim = daysInMonth(y, m); if (d > dim){ d = 1; m++; if (m > 12){ m = 1; y++; } }
+  }
+  return out;
+}
+
+function monthlySeries(rows, start, end){
+  const idx = {};
+  rows.forEach(r => { const k = r.date.slice(0,7); (idx[k] = idx[k] || []).push(r); });
+  const out = [];
+  let [y, m] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  while (y < ey || (y === ey && m <= em)){
+    const k = y + '-' + String(m).padStart(2,'0');
+    const agg = realAgg(idx[k] || []);
+    out.push({ label: MONTH_LABELS[m-1] + (y === ey && m === em ? ' (MTD)' : ''), amt: agg.amt, count: agg.count, profit: agg.profit });
+    m++; if (m > 12){ m = 1; y++; }
+  }
+  return out;
+}
+
+</script>
+<script>
+const PALETTE = [
+  '#3A7AFE','#10CA93','#00AFEF','#7C5CFC','#FF5C5C','#FFB020','#22335E','#5B8FBF',
+  '#0B5ED7','#0FE0A8','#36C5F0','#9C7BFF','#FF8A5C','#E6A64D','#3D5A80','#6BC5C0'
+];
+
+let currentTab = 'mtd';       // 'mtd' | 'ytd'
+let entityScope = 'bec';      // 'bec' | 'ansari'
+let summaryScope = 'ho';      // 'ho' | 'branch'
+
+function resetEntityFilters(){
+  branchAreaFilter = 'ALL'; branchBranchFilter = 'ALL';
+  curAreaFilter = 'ALL'; curBranchFilter = 'ALL';
+  curTrendCurrency = null;
+  hoMetric = 'amt'; trendMetric = 'amt'; curTrendMetric = 'amt'; branchMetric = 'amt'; curMetric = 'amt';
+}
+
+/* ---------- Entity / Period / Summary-scope tabs ---------- */
 function renderEntityTabs(){
   const el = document.getElementById('entityTabs');
   el.innerHTML = '';
@@ -527,29 +714,9 @@ function renderEntityTabs(){
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (key === entityScope ? ' active' : '');
     btn.textContent = label;
-    btn.onclick = () => { entityScope = key; renderAll(); };
+    btn.onclick = () => { entityScope = key; resetEntityFilters(); renderAll(); };
     el.appendChild(btn);
   });
-}
-
-/* ---------- Tabs (Month to Date / Year to Date only) ---------- */
-function pctChange(cur, prev){
-  return prev ? (cur - prev) / prev * 100 : 0;
-}
-
-// Per-metric MoM (vs a comparable simulated prior month) and YoY (vs a
-// comparable simulated prior year), for Volume, Transactions, and Active
-// Customers. Simulated, deterministic per seed — there's no real prior
-// period data to compare against.
-function computeMoMYoY(){
-  const mtdAgg = aggregateScope(DATA, 'network', 'mtd');
-  const ytdAgg = aggregateScope(DATA, 'network', 'ytd');
-  const prevMonthAgg = comparisonAgg(DATA, 'network|prevMonth', TODAY_DAY_OF_MONTH);
-  const prevYearAgg = comparisonAgg(DATA, 'network|prevYear', TODAY_DAY_OF_MONTH + (MONTHS_ELAPSED_YTD - 1) * 22);
-  return {
-    mom: { amt: pctChange(mtdAgg.amt, prevMonthAgg.amt), count: pctChange(mtdAgg.count, prevMonthAgg.count), active: pctChange(mtdAgg.active, prevMonthAgg.active) },
-    yoy: { amt: pctChange(ytdAgg.amt, prevYearAgg.amt), count: pctChange(ytdAgg.count, prevYearAgg.count), active: pctChange(ytdAgg.active, prevYearAgg.active) }
-  };
 }
 
 function buildTabs(){
@@ -564,28 +731,81 @@ function buildTabs(){
   });
 }
 
-function periodNoteText(){
-  return 'Simulated — pending live feed (scaled from ' + REAL_DATE_LABEL + ' actuals)';
+function renderSummaryScopeTabs(){
+  const el = document.getElementById('summaryScopeTabs');
+  el.innerHTML = '';
+  [['ho', 'Head Office / Wholesale'], ['branch', 'Branches']].forEach(([key,label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (key === summaryScope ? ' active' : '');
+    btn.textContent = label;
+    btn.onclick = () => { summaryScope = key; renderAll(); };
+    el.appendChild(btn);
+  });
 }
 
-/* ---------- Overview cards (whole network: Head Office + Branches) ---------- */
+// Reusable per-panel Sell/Buy multi-select toggle.
+function renderTxnTypeToggle(containerId, typesSet, onChange){
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  [['sell', 'Sell'], ['buy', 'Buy']].forEach(([key,label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'pill-btn gold' + (typesSet.has(key) ? ' active' : '');
+    btn.textContent = label;
+    btn.onclick = () => {
+      if (typesSet.has(key)){
+        if (typesSet.size > 1) typesSet.delete(key);
+      } else {
+        typesSet.add(key);
+      }
+      onChange();
+    };
+    el.appendChild(btn);
+  });
+}
+
+/* ---------- Overview cards ---------- */
 function renderCards(){
-  const cur = aggregateScope(DATA, 'network', currentTab);
+  const range = periodRange(entityScope, currentTab);
+  const scopeCode = summaryScope === 'ho' ? HO_CODE_BY_ENTITY[entityScope] : null;
+  const codes = summaryScope === 'ho' ? [scopeCode] : codesForAreaFilter(entityScope, 'ALL');
+  const opts = { codes, types: ['sell','buy'], start: range && range.start, end: range && range.end };
+  const cur = range ? aggregateForEntity(entityScope, opts) : { amt:0, count:0, profit:null };
   const avgTicket = cur.count ? cur.amt / cur.count : 0;
-  const { mom, yoy } = computeMoMYoY();
-  const deltas = currentTab === 'mtd' ? mom : yoy;
+
+  // MoM / YoY
+  const prevM = prevMonthRange(entityScope);
+  const prevY = prevYearSameRange(entityScope, currentTab);
+  const prevOptsM = prevM ? { codes, types:['sell','buy'], start: prevM.start, end: prevM.end } : null;
+  const prevOptsY = prevY ? { codes, types:['sell','buy'], start: prevY.start, end: prevY.end } : null;
+  const prevMAgg = prevOptsM ? aggregateForEntity(entityScope, prevOptsM) : null;
+  const prevYAgg = prevOptsY ? aggregateForEntity(entityScope, prevOptsY) : null;
+  // Ansari has no 2025 data at all -> YoY always N/A for ansari
+  const yoyAvailable = entityScope === 'bec';
+
+  const deltas = currentTab === 'mtd'
+    ? { amt: pctChangeOrNA(cur.amt, prevMAgg && prevMAgg.amt), count: pctChangeOrNA(cur.count, prevMAgg && prevMAgg.count), profit: pctChangeOrNA(cur.profit, prevMAgg && prevMAgg.profit) }
+    : { amt: yoyAvailable ? pctChangeOrNA(cur.amt, prevYAgg && prevYAgg.amt) : null, count: yoyAvailable ? pctChangeOrNA(cur.count, prevYAgg && prevYAgg.count) : null, profit: yoyAvailable ? pctChangeOrNA(cur.profit, prevYAgg && prevYAgg.profit) : null };
   const deltaLabel = currentTab === 'mtd' ? 'MoM' : 'YoY';
+
   const subFor = key => {
     const pct = deltas[key];
+    if (pct === null || pct === undefined) return { text: 'N/A ' + deltaLabel, cls: '' };
     const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : '';
     return { text: `${fmtPct(pct)} ${deltaLabel}`, cls };
   };
 
+  const branches = branchListFor(entityScope);
+  const locationsVal = summaryScope === 'ho' ? '1' : branches.length.toLocaleString();
+  const locationsSub = summaryScope === 'ho' ? 'Head Office / Wholesale' : (entityHasAreas(entityScope) ? 'Across ' + AREA_LIST.length + ' areas' : 'BEC branch network');
+
+  const profitText = cur.profit === null ? 'N/A' : fmtCurrency(cur.profit);
+  const profitSub = (entityScope === 'ansari' && cur.profitPartial) ? { text: 'Partial — some months not entered', cls: '' } : subFor('profit');
+
   const defs = [
     ['Volume (KWD)', fmtCurrency(cur.amt), subFor('amt')],
     ['Transactions', cur.count.toLocaleString(), subFor('count')],
-    ['Active Customers', Math.round(cur.active).toLocaleString(), subFor('active')],
-    ['Branch Locations', branchList.length.toLocaleString(), { text: '+ 1 Head Office', cls: '' }],
+    ['Gross Profit (KWD)', profitText, profitSub],
+    [summaryScope === 'ho' ? 'Location' : 'Branch Locations', locationsVal, { text: locationsSub, cls: '' }],
     ['Avg Ticket Size', fmtCurrency(avgTicket) + ' KWD', { text: '', cls: '' }]
   ];
 
@@ -598,27 +818,26 @@ function renderCards(){
       </div>`).join('');
 }
 
-/* ---------- Head Office panel (Head Office / Branch Network scope tabs) ---------- */
-let hoChartInstance = null;
+/* ---------- Currency Performance Overview (Head Office panel) ---------- */
+let hoScope = 'ho'; // 'ho' | 'branch'
 let hoMetric = 'amt';
 let hoTableCollapsed = false;
-let hoScope = 'ho'; // 'ho' | 'branch' — default Head Office
+let hoTxnTypes = new Set(['sell', 'buy']);
 
 function toggleHOTable(){
   hoTableCollapsed = !hoTableCollapsed;
-  const wrap = document.getElementById('hoTableWrap');
-  const btn = document.getElementById('hoTableToggleBtn');
-  wrap.style.display = hoTableCollapsed ? 'none' : '';
-  btn.textContent = hoTableCollapsed ? 'Show table ▾' : 'Hide table ▴';
+  document.getElementById('hoTableWrap').style.display = hoTableCollapsed ? 'none' : '';
+  document.getElementById('hoTableToggleBtn').textContent = hoTableCollapsed ? 'Show table ▾' : 'Hide table ▴';
 }
 
 function renderHOPanel(){
-  const hoRecords = DATA.filter(r => r.code === HO_CODE);
-  const branchRecords = DATA.filter(r => r.code !== HO_CODE);
-  const hoAgg = aggregateScope(hoRecords, 'ho', currentTab);
-  const branchAgg = aggregateScope(branchRecords, 'branchTotal', currentTab);
-  const combined = hoAgg.amt + branchAgg.amt;
-  const hoShare = combined ? (hoAgg.amt / combined * 100) : 0;
+  const range = periodRange(entityScope, currentTab);
+  const hoCode = HO_CODE_BY_ENTITY[entityScope];
+  const branchCodes = codesForAreaFilter(entityScope, 'ALL');
+  const types = [...hoTxnTypes];
+
+  const hoAgg = range ? aggregateForEntity(entityScope, { codes: [hoCode], types, start: range.start, end: range.end }) : { amt:0,count:0,profit:0 };
+  const branchAgg = range ? aggregateForEntity(entityScope, { codes: branchCodes, types, start: range.start, end: range.end }) : { amt:0,count:0,profit:0 };
 
   const scopeRow = document.getElementById('hoScopeRow');
   scopeRow.innerHTML = '';
@@ -630,19 +849,19 @@ function renderHOPanel(){
     scopeRow.appendChild(btn);
   });
 
-  const scopeRecords = hoScope === 'ho' ? hoRecords : branchRecords;
+  const scopeCodes = hoScope === 'ho' ? [hoCode] : branchCodes;
   const scopeAgg = hoScope === 'ho' ? hoAgg : branchAgg;
   const avgTicket = scopeAgg.count ? scopeAgg.amt / scopeAgg.count : 0;
   const scopeLabel = hoScope === 'ho' ? 'Head Office' : 'Branch Network';
 
-  document.getElementById('hoHint').textContent =
-    currentTab === 'mtd' ? 'Month to date (simulated)' : 'Year to date (simulated)';
+  document.getElementById('hoHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
 
   const cardsEl = document.getElementById('hoCards');
+  const profitVal = scopeAgg.profit === null ? 'N/A' : fmtCurrency(scopeAgg.profit);
   cardsEl.innerHTML = [
     ['Volume (KWD)', fmtCurrency(scopeAgg.amt)],
     ['Transactions', scopeAgg.count.toLocaleString()],
-    ['Active Customers', hoScope === 'branch' ? 'N/A' : Math.round(scopeAgg.active).toLocaleString()],
+    ['Gross Profit (KWD)', profitVal],
     ['Avg Ticket Size', fmtCurrency(avgTicket) + ' KWD']
   ].map(([label, val]) => `
     <div class="card grad-0" style="min-width:0;">
@@ -650,9 +869,11 @@ function renderHOPanel(){
       <div class="value">${val}</div>
     </div>`).join('');
 
+  renderTxnTypeToggle('hoTxnTypeRow', hoTxnTypes, renderHOPanel);
+
   const metricRow = document.getElementById('hoMetricRow');
   metricRow.innerHTML = '';
-  [['amt','Volume'], ['count','Transactions']].forEach(([key,label]) => {
+  metricOptionsFor(entityScope).forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn gold' + (hoMetric === key ? ' active' : '');
     btn.textContent = label;
@@ -660,15 +881,15 @@ function renderHOPanel(){
     metricRow.appendChild(btn);
   });
 
-  // Single-series bar chart: currency breakdown for the selected scope.
+  const scopeRecords = range ? filterRows(DATA, { entity: entityScope, codes: scopeCodes, types, start: range.start, end: range.end }) : [];
   const curs = [...new Set(scopeRecords.map(r => r.cur))];
-  const seedPrefix = hoScope === 'ho' ? 'hocur|' : 'brtotalcur|';
   const rows = curs.map(cur => {
     const recs = scopeRecords.filter(r => r.cur === cur);
-    const agg = aggregateScope(recs, seedPrefix + cur, currentTab);
-    return { cur, val: agg[hoMetric], amt: agg.amt, count: agg.count };
-  }).filter(r => r.val > 0)
-    .sort((a,b) => b.val - a.val)
+    const agg = realAgg(recs);
+    if (entityScope === 'ansari') agg.profit = null; // per-currency Ansari profit split isn't meaningful from a monthly manual figure
+    return { cur, ...agg };
+  }).sort((a,b) => (hoMetric === 'profit' ? (b.profit||0)-(a.profit||0) : b[hoMetric] - a[hoMetric]))
+    .filter(r => r.amt > 0)
     .slice(0, 14);
 
   const ctx = document.getElementById('hoChart').getContext('2d');
@@ -677,16 +898,11 @@ function renderHOPanel(){
     type: 'bar',
     data: {
       labels: rows.map(r => r.cur),
-      datasets: [
-        { label: scopeLabel, data: rows.map(r => r.val), backgroundColor: hoScope === 'ho' ? '#FF8A3D' : '#3A7AFE', borderRadius: 4, maxBarThickness: 34 }
-      ]
+      datasets: [{ label: scopeLabel, data: rows.map(r => r[hoMetric] || 0), backgroundColor: hoScope === 'ho' ? '#FF8A3D' : '#3A7AFE', borderRadius: 4, maxBarThickness: 34 }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => `${scopeLabel}: ${METRIC_META[hoMetric].fmt(c.parsed.y)}` } }
-      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${scopeLabel}: ${METRIC_META[hoMetric].fmt(c.parsed.y)}` } } },
       scales: {
         x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 } } },
         y: { grid: { color: '#242E47' }, ticks: { color: '#8A93AA', font: { family: 'JetBrains Mono', size: 10 } } }
@@ -695,72 +911,29 @@ function renderHOPanel(){
   });
 
   const head = document.getElementById('hoTableHead');
-  head.innerHTML = `<th>Currency</th><th>Txns</th><th>Volume (KWD)</th>`;
+  head.innerHTML = '<th>Currency</th><th>Txns</th><th>Volume (KWD)</th>' + (entityScope === 'bec' ? '<th>Gross Profit (KWD)</th>' : '');
   const body = document.getElementById('hoTableBody');
-  const totals = rows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count }), { amt:0, count:0 });
+  const totals = rows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count, profit: entityScope==='bec' ? a.profit+(r.profit||0) : null }), { amt:0, count:0, profit: entityScope==='bec' ? 0 : null });
   body.innerHTML = rows.map(r => `
-    <tr><td>${r.cur}</td><td>${Math.round(r.count).toLocaleString()}</td><td>${fmtCurrency(r.amt)}</td></tr>`).join('')
-    + `<tr class="total-row"><td>${scopeLabel} Total</td><td>${Math.round(totals.count).toLocaleString()}</td><td>${fmtCurrency(totals.amt)}</td></tr>`;
+    <tr><td>${r.cur}</td><td>${Math.round(r.count).toLocaleString()}</td><td>${fmtCurrency(r.amt)}</td>${entityScope==='bec' ? `<td>${fmtCurrency(r.profit||0)}</td>` : ''}</tr>`).join('')
+    + `<tr class="total-row"><td>${scopeLabel} Total</td><td>${Math.round(totals.count).toLocaleString()}</td><td>${fmtCurrency(totals.amt)}</td>${entityScope==='bec' ? `<td>${fmtCurrency(totals.profit)}</td>` : ''}</tr>`;
 
-  // preserve collapsed state across re-render
   document.getElementById('hoTableWrap').style.display = hoTableCollapsed ? 'none' : '';
   document.getElementById('hoTableToggleBtn').textContent = hoTableCollapsed ? 'Show table ▾' : 'Hide table ▴';
 }
-
-/* ---------- Trend panel (Head Office vs Branches) ---------- */
+let hoChartInstance = null;
+</script>
+<script>
+/* ---------- Trend panel (Head Office vs Branches, real daily/monthly data) ---------- */
 let trendChartInstance = null;
 let trendMetric = 'amt';
-let trendScope = 'branch'; // 'ho' | 'branch'
-
-function trendScopeRecords(){
-  return trendScope === 'ho' ? DATA.filter(r => r.code === HO_CODE) : DATA.filter(r => r.code !== HO_CODE);
-}
-
-function dailyTrendSynthMTDForEntity(records, seedPrefix, entity){
-  const eMult = entityMultFor(entity);
-  const todayReal = aggregateReal(records);
-  const todayAgg = { amt: todayReal.amt * eMult, count: Math.round(todayReal.count * eMult) };
-  const seed = entity + '|' + seedPrefix;
-  const days = [];
-  for (let d = 1; d <= TODAY_DAY_OF_MONTH; d++){
-    if (d === TODAY_DAY_OF_MONTH){
-      days.push({ label: 'Jul ' + d, amt: todayAgg.amt, count: todayAgg.count });
-      continue;
-    }
-    const dow = new Date(2026, 6, d).getDay(); // 5=Fri, 6=Sat (Kuwait weekend)
-    const weekendDip = (dow === 5 || dow === 6) ? 0.55 : 1;
-    const mult = synthMultiplier(seed + '|day' + d, 1, 0.35) * weekendDip;
-    days.push({ label: 'Jul ' + d, amt: Math.max(todayAgg.amt * mult, 0), count: Math.max(Math.round(todayAgg.count * mult), 0) });
-  }
-  return days;
-}
-
-function dailyTrendSynthMTD(records, seedPrefix){
-  return dailyTrendSynthMTDForEntity(records, seedPrefix, entityScope);
-}
-
-function monthlyTrendSynthYTDForEntity(records, seedPrefix, entity){
-  const daily = dailyTrendSynthMTDForEntity(records, seedPrefix, entity);
-  const julTotal = { amt: daily.reduce((a,d)=>a+d.amt,0), count: daily.reduce((a,d)=>a+d.count,0) };
-  const eMult = entityMultFor(entity);
-  const avgDailyReal = aggregateReal(records);
-  const avgDaily = { amt: avgDailyReal.amt * eMult, count: Math.round(avgDailyReal.count * eMult) };
-  const seed = entity + '|' + seedPrefix;
-  return MONTH_LABELS.map((label, i) => {
-    if (i === MONTH_LABELS.length - 1) return { label: label + ' (MTD)', amt: julTotal.amt, count: julTotal.count };
-    const mult = synthMultiplier(seed + '|month' + label, 22, 22 * 0.3);
-    return { label, amt: avgDaily.amt * mult, count: Math.round(avgDaily.count * mult) };
-  });
-}
-
-function monthlyTrendSynthYTD(records, seedPrefix){
-  return monthlyTrendSynthYTDForEntity(records, seedPrefix, entityScope);
-}
+let trendScope = 'ho'; // 'ho' | 'branch'
+let trendTxnTypes = new Set(['sell', 'buy']);
 
 function renderTrendPanel(){
-  const scopeLabel = trendScope === 'ho' ? 'Head Office' : 'Branches';
-  document.getElementById('trendTitle').textContent = (currentTab === 'mtd' ? 'Daily trend (simulated)' : 'Monthly trend (simulated)') + ' — ' + scopeLabel;
-  document.getElementById('trendHint').textContent = currentTab === 'mtd' ? 'Jul 1–21' : 'Jan–Jul';
+  const range = periodRange(entityScope, currentTab);
+  document.getElementById('trendTitle').textContent = currentTab === 'mtd' ? 'Daily Performance Trend' : 'Monthly Performance Trend';
+  document.getElementById('trendHint').textContent = range ? (range.start + ' to ' + range.end) : 'No data';
 
   const scopeRow = document.getElementById('trendScopeRow');
   scopeRow.innerHTML = '';
@@ -772,18 +945,23 @@ function renderTrendPanel(){
     scopeRow.appendChild(btn);
   });
 
+  renderTxnTypeToggle('trendTxnTypeRow', trendTxnTypes, renderTrendPanel);
+
   const metricRow = document.getElementById('trendMetricRow');
   metricRow.innerHTML = '';
-  [['amt','Volume'], ['count','Transactions']].forEach(([key,label]) => {
+  metricOptionsFor(entityScope).forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn' + (trendMetric === key ? ' active' : '');
     btn.textContent = label;
     btn.onclick = () => { trendMetric = key; renderTrendPanel(); };
     metricRow.appendChild(btn);
   });
+  if (entityScope !== 'bec' && trendMetric === 'profit') trendMetric = 'amt';
 
-  const records = trendScopeRecords();
-  const series = currentTab === 'mtd' ? dailyTrendSynthMTD(records, trendScope) : monthlyTrendSynthYTD(records, trendScope);
+  const hoCode = HO_CODE_BY_ENTITY[entityScope];
+  const scopeCodes = trendScope === 'ho' ? [hoCode] : codesForAreaFilter(entityScope, 'ALL');
+  const rows = range ? filterRows(DATA, { entity: entityScope, codes: scopeCodes, types: [...trendTxnTypes], start: range.start, end: range.end }) : [];
+  const series = range ? (currentTab === 'mtd' ? dailySeries(rows, range.start, range.end) : monthlySeries(rows, range.start, range.end)) : [];
   const labels = series.map(s => s.label);
   const data = series.map(s => s[trendMetric]);
 
@@ -792,8 +970,7 @@ function renderTrendPanel(){
   trendChartInstance = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets: [{
-      label: trendMetric === 'amt' ? 'Volume (KWD)' : 'Transactions',
-      data,
+      label: METRIC_META[trendMetric].label, data,
       borderColor: trendScope === 'ho' ? '#FF8A3D' : '#3A7AFE',
       backgroundColor: trendScope === 'ho' ? 'rgba(255,138,61,.15)' : 'rgba(58,122,254,.15)',
       borderWidth: 2.5, pointRadius: 0, tension: 0.3, fill: true
@@ -803,44 +980,60 @@ function renderTrendPanel(){
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 } } },
+        x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 }, maxTicksLimit: 16 } },
         y: { grid: { color: '#242E47' }, ticks: { color: '#8A93AA', font: { family: 'JetBrains Mono', size: 10 } } }
       }
     }
   });
 }
 
-/* ---------- Currency-wise Trend (dropdown to pick currency; MTD & YTD) ---------- */
+/* ---------- Performance Trend by currency ---------- */
 let curTrendChartInstance = null;
 let curTrendMetric = 'amt';
-let curTrendCurrency = null; // set to top currency on first render
+let curTrendCurrency = null;
+let curTrendScope = 'ho'; // 'ho' | 'branch'
+let curTrendTxnTypes = new Set(['sell', 'buy']);
 
 function renderCurrencyTrendPanel(){
-  if (!curTrendCurrency) curTrendCurrency = currencyList[0];
+  const curList = CUR_LIST_BY_ENTITY[entityScope];
+  if (!curTrendCurrency || !curList.includes(curTrendCurrency)) curTrendCurrency = curList[0];
 
-  document.getElementById('curTrendTitle').textContent = 'Currency-wise Trend — ' + curTrendCurrency;
-  document.getElementById('curTrendHint').textContent = (currentTab === 'mtd' ? 'Daily (simulated) · Jul 1–21' : 'Monthly (simulated) · Jan–Jul');
+  document.getElementById('curTrendTitle').textContent = currentTab === 'mtd' ? 'Daily Performance Trend by currency' : 'Monthly Performance Trend by currency';
+  const range = periodRange(entityScope, currentTab);
+  document.getElementById('curTrendHint').textContent = range ? (range.start + ' to ' + range.end) : 'No data';
 
   const select = document.getElementById('curTrendSelect');
-  if (!select.dataset.built){
-    select.innerHTML = currencyList.map(c => `<option value="${c}">${c}</option>`).join('');
-    select.dataset.built = '1';
-    select.onchange = () => { curTrendCurrency = select.value; renderCurrencyTrendPanel(); };
-  }
+  select.innerHTML = curList.map(c => `<option value="${c}">${c}</option>`).join('');
   select.value = curTrendCurrency;
+  select.onchange = () => { curTrendCurrency = select.value; renderCurrencyTrendPanel(); };
+
+  const scopeRow = document.getElementById('curTrendScopeRow');
+  scopeRow.innerHTML = '';
+  [['ho','Head Office'], ['branch','Branches']].forEach(([key,label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'pill-btn gold' + (curTrendScope === key ? ' active' : '');
+    btn.textContent = label;
+    btn.onclick = () => { curTrendScope = key; renderCurrencyTrendPanel(); };
+    scopeRow.appendChild(btn);
+  });
+
+  renderTxnTypeToggle('curTrendTxnTypeRow', curTrendTxnTypes, renderCurrencyTrendPanel);
 
   const metricRow = document.getElementById('curTrendMetricRow');
   metricRow.innerHTML = '';
-  [['amt','Volume'], ['count','Transactions']].forEach(([key,label]) => {
+  metricOptionsFor(entityScope).forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn' + (curTrendMetric === key ? ' active' : '');
     btn.textContent = label;
     btn.onclick = () => { curTrendMetric = key; renderCurrencyTrendPanel(); };
     metricRow.appendChild(btn);
   });
+  if (entityScope !== 'bec' && curTrendMetric === 'profit') curTrendMetric = 'amt';
 
-  const records = DATA.filter(r => r.cur === curTrendCurrency);
-  const series = currentTab === 'mtd' ? dailyTrendSynthMTD(records, 'curtrend|' + curTrendCurrency) : monthlyTrendSynthYTD(records, 'curtrend|' + curTrendCurrency);
+  const hoCode = HO_CODE_BY_ENTITY[entityScope];
+  const scopeCodes = curTrendScope === 'ho' ? [hoCode] : codesForAreaFilter(entityScope, 'ALL');
+  const rows = range ? filterRows(DATA, { entity: entityScope, codes: scopeCodes, cur: curTrendCurrency, types: [...curTrendTxnTypes], start: range.start, end: range.end }) : [];
+  const series = range ? (currentTab === 'mtd' ? dailySeries(rows, range.start, range.end) : monthlySeries(rows, range.start, range.end)) : [];
   const labels = series.map(s => s.label);
   const data = series.map(s => s[curTrendMetric]);
 
@@ -849,10 +1042,8 @@ function renderCurrencyTrendPanel(){
   curTrendChartInstance = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets: [{
-      label: curTrendMetric === 'amt' ? 'Volume (KWD)' : 'Transactions',
-      data,
-      borderColor: '#10CA93',
-      backgroundColor: 'rgba(16,202,147,.15)',
+      label: METRIC_META[curTrendMetric].label, data,
+      borderColor: '#10CA93', backgroundColor: 'rgba(16,202,147,.15)',
       borderWidth: 2.5, pointRadius: 0, tension: 0.3, fill: true
     }] },
     options: {
@@ -860,51 +1051,68 @@ function renderCurrencyTrendPanel(){
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 } } },
+        x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 }, maxTicksLimit: 16 } },
         y: { grid: { color: '#242E47' }, ticks: { color: '#8A93AA', font: { family: 'JetBrains Mono', size: 10 } } }
       }
     }
   });
 }
 
-/* ---------- Branch comparison (excludes Head Office; Area filter; no Active Customers) ---------- */
+/* ---------- Branch FX Performance Comparison (excludes Head Office; top 10 default) ---------- */
 let branchChartInstance = null;
 let branchMetric = 'amt';
 let branchAreaFilter = 'ALL';
+let branchBranchFilter = 'ALL';
+let branchTxnTypes = new Set(['sell', 'buy']);
 
-function branchRows(period, areaFilter){
-  const codes = codesForAreaFilter(areaFilter);
-  return branchList.filter(b => codes.includes(b.code)).map(b => {
-    const records = DATA.filter(r => r.code === b.code);
-    return { code: b.code, name: b.name, area: b.area, ...aggregateScope(records, 'br|' + b.code, period) };
+function branchRowsFor(range, areaFilter, types){
+  const list = branchListFor(entityScope).filter(b => areaFilter === 'ALL' || b.area === areaFilter);
+  return list.map(b => {
+    const rows = range ? filterRows(DATA, { entity: entityScope, codes: [b.code], types, start: range.start, end: range.end }) : [];
+    const agg = realAgg(rows);
+    if (entityScope === 'ansari') agg.profit = null;
+    return { code: b.code, name: b.name, area: b.area, ...agg };
   });
 }
 
 function renderBranchPanel(){
-  document.getElementById('branchHint').textContent = currentTab === 'mtd' ? 'Month to date (simulated)' : 'Year to date (simulated)';
+  document.getElementById('branchHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
+  const range = periodRange(entityScope, currentTab);
+  const hasAreas = entityHasAreas(entityScope);
 
-  const areaRow = document.getElementById('branchAreaRow');
-  areaRow.innerHTML = '';
-  ['ALL', ...AREA_LIST].forEach(a => {
-    const btn = document.createElement('button');
-    btn.className = 'pill-btn gold' + (branchAreaFilter === a ? ' active' : '');
-    btn.textContent = a === 'ALL' ? 'All Areas' : a;
-    btn.onclick = () => { branchAreaFilter = a; renderBranchPanel(); };
-    areaRow.appendChild(btn);
-  });
+  const areaSelect = document.getElementById('branchAreaSelect');
+  areaSelect.innerHTML = hasAreas
+    ? ['ALL', ...AREA_LIST].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
+    : '<option value="ALL">All Branches</option>';
+  areaSelect.value = branchAreaFilter;
+  areaSelect.disabled = !hasAreas;
+  areaSelect.onchange = () => { branchAreaFilter = areaSelect.value; branchBranchFilter = 'ALL'; renderBranchPanel(); };
+
+  const branchesInArea = branchListFor(entityScope).filter(b => branchAreaFilter === 'ALL' || b.area === branchAreaFilter);
+  const branchLabel = branchAreaFilter === 'ALL' ? 'Top 10 Branches' : 'Top 10 in ' + branchAreaFilter;
+  const branchSelect = document.getElementById('branchBranchSelect');
+  branchSelect.innerHTML = [['ALL', branchLabel], ...branchesInArea.map(b => [b.code, b.name])]
+    .map(([key,label]) => `<option value="${key}">${label}</option>`).join('');
+  branchSelect.value = branchBranchFilter;
+  branchSelect.onchange = () => { branchBranchFilter = branchSelect.value; renderBranchPanel(); };
+
+  renderTxnTypeToggle('branchTxnTypeRow', branchTxnTypes, renderBranchPanel);
 
   const metricRow = document.getElementById('branchMetricRow');
   metricRow.innerHTML = '';
-  Object.keys(BRANCH_METRIC_META).forEach(key => {
+  metricOptionsFor(entityScope).forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn' + (branchMetric === key ? ' active' : '');
-    btn.textContent = BRANCH_METRIC_META[key].label;
+    btn.textContent = label;
     btn.onclick = () => { branchMetric = key; renderBranchPanel(); };
     metricRow.appendChild(btn);
   });
+  if (entityScope !== 'bec' && branchMetric === 'profit') branchMetric = 'amt';
 
-  const rows = branchRows(currentTab, branchAreaFilter).sort((a,b) => b[branchMetric] - a[branchMetric]);
-  const total = rows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count }), { amt:0, count:0 });
+  const types = [...branchTxnTypes];
+  const allRows = branchRowsFor(range, branchAreaFilter, types).sort((a,b) => (b[branchMetric]||0) - (a[branchMetric]||0));
+  const rows = branchBranchFilter === 'ALL' ? allRows.slice(0, 10) : allRows.filter(r => r.code === branchBranchFilter);
+  const total = allRows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count, profit: entityScope==='bec' ? a.profit+(r.profit||0) : null }), { amt:0, count:0, profit: entityScope==='bec'?0:null });
 
   const ctx = document.getElementById('branchChart').getContext('2d');
   if (branchChartInstance) branchChartInstance.destroy();
@@ -912,19 +1120,11 @@ function renderBranchPanel(){
     type: 'bar',
     data: {
       labels: rows.map(r => r.name),
-      datasets: [{
-        data: rows.map(r => r[branchMetric]),
-        backgroundColor: rows.map((_,i) => PALETTE[i % PALETTE.length]),
-        borderRadius: 4, maxBarThickness: 26
-      }]
+      datasets: [{ data: rows.map(r => r[branchMetric] || 0), backgroundColor: rows.map((_,i) => PALETTE[i % PALETTE.length]), borderRadius: 4, maxBarThickness: 26 }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      indexAxis: 'y',
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => BRANCH_METRIC_META[branchMetric].fmt(c.parsed.x) } }
-      },
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => METRIC_META[branchMetric].fmt(c.parsed.x) } } },
       scales: {
         y: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 10.5 } } },
         x: { grid: { color: '#242E47' }, ticks: { color: '#8A93AA', font: { family: 'JetBrains Mono', size: 10 } } }
@@ -932,32 +1132,36 @@ function renderBranchPanel(){
     }
   });
 
+  const cols = metricOptionsFor(entityScope);
   const head = document.getElementById('branchTableHead');
-  head.innerHTML = '<th>Branch</th><th>Area</th>' + Object.keys(BRANCH_METRIC_META).map(k => `<th>${BRANCH_METRIC_META[k].label}</th>`).join('');
+  head.innerHTML = '<th>Branch</th>' + (hasAreas ? '<th>Area</th>' : '') + cols.map(([k,l]) => `<th>${l}</th>`).join('');
   const body = document.getElementById('branchTableBody');
   const totalLabel = branchAreaFilter === 'ALL' ? 'Branch Network Total' : branchAreaFilter + ' Total';
-  body.innerHTML = rows.map(r => `<tr><td>${r.name}</td><td>${r.area}</td>${Object.keys(BRANCH_METRIC_META).map(k => `<td>${BRANCH_METRIC_META[k].fmt(r[k])}</td>`).join('')}</tr>`).join('')
-    + `<tr class="total-row"><td>${totalLabel}</td><td></td>${Object.keys(BRANCH_METRIC_META).map(k => `<td>${BRANCH_METRIC_META[k].fmt(total[k])}</td>`).join('')}</tr>`;
+  body.innerHTML = rows.map(r => `<tr><td>${r.name}</td>${hasAreas ? `<td>${r.area||''}</td>` : ''}${cols.map(([k]) => `<td>${METRIC_META[k].fmt(r[k])}</td>`).join('')}</tr>`).join('')
+    + `<tr class="total-row"><td>${totalLabel}</td>${hasAreas ? '<td></td>' : ''}${cols.map(([k]) => `<td>${METRIC_META[k].fmt(total[k])}</td>`).join('')}</tr>`;
 }
 
-/* ---------- Branch Currency-wise Comparison (dropdowns for Area + Branch; excl. Head Office) ---------- */
+/* ---------- Branch Currency-wise Comparison ---------- */
 let curChartInstance = null;
 let curAreaFilter = 'ALL';
-let curBranchFilter = 'ALL'; // 'ALL' within the area, or a specific branch code
+let curBranchFilter = 'ALL';
 let curMetric = 'amt';
+let curTxnTypes = new Set(['sell', 'buy']);
 
 function renderCurrencyPanel(){
-  document.getElementById('curHint').textContent = currentTab === 'mtd' ? 'Month to date (simulated)' : 'Year to date (simulated)';
+  document.getElementById('curHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
+  const range = periodRange(entityScope, currentTab);
+  const hasAreas = entityHasAreas(entityScope);
 
   const areaSelect = document.getElementById('curAreaSelect');
-  if (!areaSelect.dataset.built){
-    areaSelect.innerHTML = ['ALL', ...AREA_LIST].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('');
-    areaSelect.dataset.built = '1';
-    areaSelect.onchange = () => { curAreaFilter = areaSelect.value; curBranchFilter = 'ALL'; renderCurrencyPanel(); };
-  }
+  areaSelect.innerHTML = hasAreas
+    ? ['ALL', ...AREA_LIST].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
+    : '<option value="ALL">All Branches</option>';
   areaSelect.value = curAreaFilter;
+  areaSelect.disabled = !hasAreas;
+  areaSelect.onchange = () => { curAreaFilter = areaSelect.value; curBranchFilter = 'ALL'; renderCurrencyPanel(); };
 
-  const branchesInArea = branchList.filter(b => curAreaFilter === 'ALL' || b.area === curAreaFilter);
+  const branchesInArea = branchListFor(entityScope).filter(b => curAreaFilter === 'ALL' || b.area === curAreaFilter);
   const branchLabel = curAreaFilter === 'ALL' ? 'All Branches' : 'All in ' + curAreaFilter;
   const branchSelect = document.getElementById('curBranchSelect');
   branchSelect.innerHTML = [['ALL', branchLabel], ...branchesInArea.map(b => [b.code, b.name])]
@@ -965,46 +1169,39 @@ function renderCurrencyPanel(){
   branchSelect.value = curBranchFilter;
   branchSelect.onchange = () => { curBranchFilter = branchSelect.value; renderCurrencyPanel(); };
 
+  renderTxnTypeToggle('curTxnTypeRow', curTxnTypes, renderCurrencyPanel);
+
   const metricRow = document.getElementById('curMetricRow');
   metricRow.innerHTML = '';
-  [['amt','Volume'], ['count','Transactions']].forEach(([key,label]) => {
+  metricOptionsFor(entityScope).forEach(([key,label]) => {
     const btn = document.createElement('button');
     btn.className = 'pill-btn gold' + (curMetric === key ? ' active' : '');
     btn.textContent = label;
     btn.onclick = () => { curMetric = key; renderCurrencyPanel(); };
     metricRow.appendChild(btn);
   });
+  if (entityScope !== 'bec' && curMetric === 'profit') curMetric = 'amt';
 
-  const scopeCodes = curBranchFilter === 'ALL' ? codesForAreaFilter(curAreaFilter) : [curBranchFilter];
-  const scopeLabel = curBranchFilter === 'ALL' ? curAreaFilter : curBranchFilter;
-  const scopeRecords = DATA.filter(r => scopeCodes.includes(r.code));
+  const scopeCodes = curBranchFilter === 'ALL' ? codesForAreaFilter(entityScope, curAreaFilter) : [curBranchFilter];
+  const types = [...curTxnTypes];
+  const scopeRecords = range ? filterRows(DATA, { entity: entityScope, codes: scopeCodes, types, start: range.start, end: range.end }) : [];
   const curs = [...new Set(scopeRecords.map(r => r.cur))];
   const rows = curs.map(cur => {
     const recs = scopeRecords.filter(r => r.cur === cur);
-    return { cur, ...aggregateScope(recs, 'cur|' + scopeLabel + '|' + cur, currentTab) };
-  }).sort((a,b) => b[curMetric] - a[curMetric]);
-
-  const metricLabel = curMetric === 'amt' ? 'Volume' : 'Transactions';
+    const agg = realAgg(recs);
+    if (entityScope === 'ansari') agg.profit = null;
+    return { cur, ...agg };
+  }).sort((a,b) => (b[curMetric]||0) - (a[curMetric]||0));
 
   const ctx = document.getElementById('curChart').getContext('2d');
   const top = rows.slice(0, 14);
   if (curChartInstance) curChartInstance.destroy();
   curChartInstance = new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels: top.map(r => r.cur),
-      datasets: [{
-        data: top.map(r => r[curMetric]),
-        backgroundColor: top.map((_,i) => PALETTE[i % PALETTE.length]),
-        borderRadius: 4, maxBarThickness: 34
-      }]
-    },
+    data: { labels: top.map(r => r.cur), datasets: [{ data: top.map(r => r[curMetric] || 0), backgroundColor: top.map((_,i) => PALETTE[i % PALETTE.length]), borderRadius: 4, maxBarThickness: 34 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => metricLabel + ': ' + (curMetric === 'amt' ? fmtCurrency(c.parsed.y) : Math.round(c.parsed.y).toLocaleString()) } }
-      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => METRIC_META[curMetric].label + ': ' + METRIC_META[curMetric].fmt(c.parsed.y) } } },
       scales: {
         x: { grid: { display: false }, ticks: { color: '#8A93AA', font: { family: 'Inter', size: 11 } } },
         y: { grid: { color: '#242E47' }, ticks: { color: '#8A93AA', font: { family: 'JetBrains Mono', size: 10 } } }
@@ -1012,15 +1209,16 @@ function renderCurrencyPanel(){
     }
   });
 
+  const cols = metricOptionsFor(entityScope);
   const head = document.getElementById('curTableHead');
-  head.innerHTML = '<th>Currency</th><th>Txns</th><th>Volume (KWD)</th>';
+  head.innerHTML = '<th>Currency</th>' + cols.map(([k,l]) => `<th>${l}</th>`).join('');
   const body = document.getElementById('curTableBody');
-  const totals = rows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count }), { amt:0, count:0 });
-  body.innerHTML = rows.map(r => `
-    <tr><td>${r.cur}</td><td>${Math.round(r.count).toLocaleString()}</td><td>${fmtCurrency(r.amt)}</td></tr>`).join('')
-    + `<tr class="total-row"><td>All Currencies</td><td>${Math.round(totals.count).toLocaleString()}</td><td>${fmtCurrency(totals.amt)}</td></tr>`;
+  const totals = rows.reduce((a,r) => ({ amt:a.amt+r.amt, count:a.count+r.count, profit: entityScope==='bec' ? a.profit+(r.profit||0) : null }), { amt:0, count:0, profit: entityScope==='bec'?0:null });
+  body.innerHTML = rows.map(r => `<tr><td>${r.cur}</td>${cols.map(([k]) => `<td>${METRIC_META[k].fmt(r[k])}</td>`).join('')}</tr>`).join('')
+    + `<tr class="total-row"><td>All Currencies</td>${cols.map(([k]) => `<td>${METRIC_META[k].fmt(totals[k])}</td>`).join('')}</tr>`;
 }
 
+/* ---------- Init ---------- */
 function toggleSection(key){
   const body = document.getElementById(key + 'Body');
   const icon = document.getElementById(key + 'Icon');
@@ -1039,6 +1237,7 @@ function toggleSection(key){
 function renderAll(){
   renderEntityTabs();
   buildTabs();
+  renderSummaryScopeTabs();
   renderCards();
   renderHOPanel();
   renderTrendPanel();
@@ -1047,7 +1246,7 @@ function renderAll(){
   renderCurrencyPanel();
 }
 
-renderAll();
+loadAll();
 </script>
 </body>
 </html>
