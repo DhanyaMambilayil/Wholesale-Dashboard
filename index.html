@@ -588,6 +588,22 @@ function prevMonthRange(entity){
   return { start: monthKey(y,m) + '-01', end: monthKey(y,m) + '-' + String(daysInMonth(y,m)).padStart(2,'0') };
 }
 
+// Branches that actually had at least one real transaction within a given
+// date range (excludes Head Office). Used for the "Branch Locations" card
+// so the count reflects who's actually active, not just every code ever
+// seen historically.
+function activeBranchesFor(entity, range){
+  const known = branchListFor(entity);
+  if (!range) return known;
+  const active = new Set();
+  DATA.forEach(r => {
+    if (r.entity !== entity || r.isHO) return;
+    if (r.date < range.start || r.date > range.end) return;
+    active.add(r.code);
+  });
+  return known.filter(b => active.has(b.code));
+}
+
 function prevYearSameRange(entity, period){
   const range = periodRange(entity, period);
   if (!range) return null;
@@ -794,9 +810,10 @@ function renderCards(){
     return { text: `${fmtPct(pct)} ${deltaLabel}`, cls };
   };
 
-  const branches = branchListFor(entityScope);
-  const locationsVal = summaryScope === 'ho' ? '1' : branches.length.toLocaleString();
-  const locationsSub = summaryScope === 'ho' ? 'Head Office / Wholesale' : (entityHasAreas(entityScope) ? 'Across ' + AREA_LIST.length + ' areas' : 'BEC branch network');
+  const lastMonth = prevMonthRange(entityScope);
+  const activeBranches = activeBranchesFor(entityScope, lastMonth);
+  const locationsVal = summaryScope === 'ho' ? '1' : activeBranches.length.toLocaleString();
+  const locationsSub = summaryScope === 'ho' ? 'Head Office / Wholesale' : (entityHasAreas(entityScope) ? 'Active last month, across ' + AREA_LIST.length + ' areas' : 'Active last month');
 
   const profitText = cur.profit === null ? 'N/A' : fmtCurrency(cur.profit);
   const profitSub = (entityScope === 'ansari' && cur.profitPartial) ? { text: 'Partial — some months not entered', cls: '' } : subFor('profit');
@@ -1250,3 +1267,4 @@ loadAll();
 </script>
 </body>
 </html>
+
