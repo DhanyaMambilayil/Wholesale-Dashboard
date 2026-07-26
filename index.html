@@ -3,50 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wholesale Dashboard</title>
+<title>BEC Wholesale Dashboard</title>
 
 <!--
   =====================================================================
-  ABOUT THIS FILE — v2: real data, fetched from CSV files
+  ABOUT THIS FILE — BEC Wholesale Dashboard (split from the combined
+  BEC + Ansari dashboard so each entity loads only its own data)
   =====================================================================
-  This version no longer embeds data in the HTML. It fetches CSV files
-  from a sibling "data/" folder at load time, so updating the numbers
-  is just: edit a CSV, commit, push. See the README / chat instructions
-  for exact GitHub steps.
+  This is the BEC-only dashboard. It's fully driven by real data (no
+  simulated/placeholder figures anywhere) — 2025 is frozen, 2026 is the
+  one you keep appending rows to.
 
   EXPECTED FILES (relative to this HTML file):
-    data/bec-2025.csv                 (BEC Head Office / Wholesale, frozen)
-    data/bec-2026.csv                 (BEC Head Office / Wholesale, growing)
-    data/bec-branches-2025.csv        (BEC branch network, frozen)
-    data/bec-branches-2026.csv        (BEC branch network, growing)
-    data/ansari-2026.csv              (Ansari, real May 1 – Jul 24 2026 so far)
-    data/ansari-gross-profit-manual.csv (Ansari Gross Profit, filled in by hand, monthly)
+    data/bec-2025.csv           (BEC Head Office / Wholesale, frozen)
+    data/bec-2026.csv           (BEC Head Office / Wholesale, growing)
+    data/bec-branches-2025.csv  (BEC branch network, frozen)
+    data/bec-branches-2026.csv  (BEC branch network, growing)
 
-  IMPORTANT CAVEATS — please read:
-  1. This dashboard now shows REAL figures wherever real data exists,
-     and clearly marks "N/A" / "partial" where it doesn't — it no
-     longer fabricates placeholder numbers the way earlier versions
-     did, since that would be misleading for a live operational tool.
-  2. BEC is fully real for both 2025 and 2026 — so MTD, YTD, MoM, and
-     YoY are all genuine computed comparisons for BEC.
-  3. Ansari only has real data from 1 May 2026 onward. There's no 2025
-     Ansari data and no Jan–Apr 2026 data, so: MTD and MoM are real
-     (since the current month and the prior month are both covered);
-     YTD only reflects May 1 onward (labelled "partial year"); YoY is
-     not available at all (shown as N/A) until 2025 data is provided.
-  4. Ansari has no real Gross Profit / commission data (near-zero in
-     the source report), so Gross Profit for Ansari comes entirely
-     from the manual monthly file. If a month hasn't been filled in
-     yet, it's excluded and the figure is labelled "partial".
-  5. BEC's branch network (from branches_fx_dump.xlsx) has no area/
-     region grouping provided, so the Area dropdown only applies to
-     Ansari; for BEC it just offers "All Branches" plus each branch
-     code directly (e.g. AIR, T5A, MB2 — these are BEC's own branch
-     codes, not the SHABIR/SAKEER/ANOOP structure used for Ansari).
-  6. Ansari has no real Buy-side transactions (FCY-Sale report only),
-     so selecting "Buy" alone for Ansari will correctly show empty /
-     zero — that's accurate, not a bug.
-  7. This file must be served over http(s) to fetch the CSVs — opening
+  For the Ansari side, use the separate ansari-dashboard (its own
+  index.html + its own data/ folder) — keeping them apart means neither
+  dashboard has to load the other's CSVs, which is most of the payload
+  (BEC's branch network alone is ~23MB across both years).
+
+  NOTES:
+  1. BEC is fully real for both 2025 and 2026, so MTD, YTD, MoM, and
+     YoY are all genuine computed comparisons — nothing is simulated.
+  2. BEC's branch network (from branches_fx_dump.xlsx) has no area/
+     region grouping provided, so the Area dropdown just offers "All
+     Branches" plus each branch code directly (e.g. AIR, T5A, MB2).
+  3. This file must be served over http(s) to fetch the CSVs — opening
      it directly as a local file (file://) will fail due to browser
      CORS restrictions. Use GitHub Pages, a local dev server, etc.
   =====================================================================
@@ -228,8 +213,8 @@
 
   <header>
     <div class="title-block">
-      <h1>Wholesale Dashboard</h1>
-      <p>Head Office &amp; Branch Network — Currency &amp; Area performance</p>
+      <h1>BEC Wholesale Dashboard</h1>
+      <p>Head Office / Wholesale &amp; Branch Network — Currency performance</p>
     </div>
   </header>
 
@@ -241,10 +226,7 @@
   <div id="errorScreen" style="display:none;"></div>
 
   <div id="dashboardRoot" style="display:none;">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-      <div class="tabs" id="entityTabs" style="margin-bottom:0;"></div>
-      <div class="tabs" id="tabs" style="margin-bottom:0;"></div>
-    </div>
+    <div class="tabs" id="tabs"></div>
     <div class="tabs" id="summaryScopeTabs" style="margin-bottom:10px;"></div>
 
   <div id="periodView">
@@ -370,9 +352,7 @@ const CSV_FILES = {
   becHo2025: 'data/bec-2025.csv',
   becHo2026: 'data/bec-2026.csv',
   becBr2025: 'data/bec-branches-2025.csv',
-  becBr2026: 'data/bec-branches-2026.csv',
-  ansari2026: 'data/ansari-2026.csv',
-  ansariGP: 'data/ansari-gross-profit-manual.csv'
+  becBr2026: 'data/bec-branches-2026.csv'
 };
 
 function fetchCSV(path){
@@ -456,10 +436,9 @@ function normalizeAnsariRow(row){
 
 async function loadAll(){
   try {
-    const [becHo25, becHo26, becBr25, becBr26, ansari26, ansariGP] = await Promise.all([
+    const [becHo25, becHo26, becBr25, becBr26] = await Promise.all([
       fetchCSV(CSV_FILES.becHo2025), fetchCSV(CSV_FILES.becHo2026),
-      fetchCSV(CSV_FILES.becBr2025), fetchCSV(CSV_FILES.becBr2026),
-      fetchCSV(CSV_FILES.ansari2026), fetchCSV(CSV_FILES.ansariGP)
+      fetchCSV(CSV_FILES.becBr2025), fetchCSV(CSV_FILES.becBr2026)
     ]);
 
     const rows = [];
@@ -467,27 +446,18 @@ async function loadAll(){
     becHo26.forEach(r => { const n = normalizeBecRow(r, true); if (n) rows.push(n); });
     becBr25.forEach(r => { const n = normalizeBecRow(r, false); if (n) rows.push(n); });
     becBr26.forEach(r => { const n = normalizeBecRow(r, false); if (n) rows.push(n); });
-    ansari26.forEach(r => { const n = normalizeAnsariRow(r); if (n) rows.push(n); });
     DATA = rows;
 
-    ansariGP.forEach(r => {
-      if (!r.month) return;
-      const v = r.gross_profit_kwd;
-      ANSARI_MONTHLY_GP[String(r.month)] = (v === '' || v === null || v === undefined) ? null : Number(v);
-    });
-
     const becCodes = new Set();
-    DATA.forEach(r => { if (r.entity === 'bec' && !r.isHO) becCodes.add(r.code); });
+    DATA.forEach(r => { if (!r.isHO) becCodes.add(r.code); });
     BEC_BRANCH_LIST = [...becCodes].sort().map(code => ({ code, name: code }));
 
-    ['bec','ansari'].forEach(ent => {
-      CUR_LIST_BY_ENTITY[ent] = [...new Set(DATA.filter(r => r.entity === ent).map(r => r.cur))]
-        .sort((a,b) => {
-          const va = DATA.filter(r => r.entity===ent && r.cur===a).reduce((s,r)=>s+r.amt,0);
-          const vb = DATA.filter(r => r.entity===ent && r.cur===b).reduce((s,r)=>s+r.amt,0);
-          return vb - va;
-        });
-    });
+    CUR_LIST_BY_ENTITY.bec = [...new Set(DATA.map(r => r.cur))]
+      .sort((a,b) => {
+        const va = DATA.filter(r => r.cur===a).reduce((s,r)=>s+r.amt,0);
+        const vb = DATA.filter(r => r.cur===b).reduce((s,r)=>s+r.amt,0);
+        return vb - va;
+      });
 
     document.getElementById('loadScreen').style.display = 'none';
     document.getElementById('dashboardRoot').style.display = '';
@@ -712,28 +682,8 @@ const PALETTE = [
 ];
 
 let currentTab = 'mtd';       // 'mtd' | 'ytd'
-let entityScope = 'bec';      // 'bec' | 'ansari'
+const entityScope = 'bec';    // fixed — this is the BEC-only dashboard
 let summaryScope = 'ho';      // 'ho' | 'branch'
-
-function resetEntityFilters(){
-  branchAreaFilter = 'ALL'; branchBranchFilter = 'ALL';
-  curAreaFilter = 'ALL'; curBranchFilter = 'ALL';
-  curTrendCurrency = null;
-  hoMetric = 'amt'; trendMetric = 'amt'; curTrendMetric = 'amt'; branchMetric = 'amt'; curMetric = 'amt';
-}
-
-/* ---------- Entity / Period / Summary-scope tabs ---------- */
-function renderEntityTabs(){
-  const el = document.getElementById('entityTabs');
-  el.innerHTML = '';
-  [['bec', 'BEC'], ['ansari', 'ANSARI']].forEach(([key,label]) => {
-    const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (key === entityScope ? ' active' : '');
-    btn.textContent = label;
-    btn.onclick = () => { entityScope = key; resetEntityFilters(); renderAll(); };
-    el.appendChild(btn);
-  });
-}
 
 function buildTabs(){
   const el = document.getElementById('tabs');
@@ -1252,7 +1202,6 @@ function toggleSection(key){
 }
 
 function renderAll(){
-  renderEntityTabs();
   buildTabs();
   renderSummaryScopeTabs();
   renderCards();
@@ -1267,4 +1216,3 @@ loadAll();
 </script>
 </body>
 </html>
-
