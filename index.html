@@ -372,6 +372,66 @@ function fetchCSV(path){
 
 const HO_CODE_BY_ENTITY = { bec: 'WSL', ansari: '9999' };
 const AREA_LIST = ['SHABIR AREA', 'SAKEER AREA', 'ANOOP AREA'];
+
+// BEC branch codes -> proper name + Area Manager, from branch_list.xlsx.
+// Any branch code seen in the transaction data but not listed here falls
+// back to using its raw code as the name, grouped under "Unassigned".
+const BEC_BRANCH_META = {
+  'AB2': { name: 'Abbasiya-2',           area: 'Renosh' },
+  'AB3': { name: 'Abbasiya-3',           area: 'Renosh' },
+  'AB4': { name: 'Abbasiya-4',           area: 'Renosh' },
+  'ABH': { name: 'Abuhalifa',            area: 'Shafiq' },
+  'AIR': { name: 'Airport',              area: 'Abdrabou' },
+  'AMG': { name: 'Amghara',              area: 'Renosh' },
+  'AVE': { name: 'Avenues',              area: 'Renosh' },
+  'FA2': { name: 'Fahaheel-2',           area: 'Shafiq' },
+  'FA3': { name: 'Farwaniya-3',          area: 'Abdrabou' },
+  'FAG': { name: 'Fahaheel Grand',       area: 'Shafiq' },
+  'FAH': { name: 'Fahaheel',             area: 'Shafiq' },
+  'FAR': { name: 'Farwaniya',            area: 'Abdrabou' },
+  'FAS': { name: 'Fahaheel Souk',        area: 'Shafiq' },
+  'FIN': { name: 'Fintas',               area: 'Shafiq' },
+  'FR4': { name: 'Farwaniya-4',          area: 'Abdrabou' },
+  'FR5': { name: 'Farwaniya Maghateer',  area: 'Abdrabou' },
+  'FR6': { name: 'Farwaniya-6',          area: 'Abdrabou' },
+  'FR7': { name: 'Farwaniya-7',          area: 'Abdrabou' },
+  'HAS': { name: 'Hassawi',              area: 'Renosh' },
+  'HS2': { name: 'Hassawi-2',            area: 'Renosh' },
+  'HS3': { name: 'Hasawi Grand Hyper',   area: 'Renosh' },
+  'IBK': { name: 'Ibk Hawally',          area: 'Abdrabou' },
+  'JA2': { name: 'Jahra-2',              area: 'Renosh' },
+  'JA3': { name: 'Jahra-3',              area: 'Renosh' },
+  'KAH': { name: 'Khaithan',             area: 'Abdrabou' },
+  'KH2': { name: 'Khaithan-2',           area: 'Abdrabou' },
+  'KH3': { name: 'Khaithan-3',           area: 'Abdrabou' },
+  'KH4': { name: 'Khaithan-4',           area: 'Abdrabou' },
+  'MB2': { name: 'Mahboula-2',           area: 'Shafiq' },
+  'MB3': { name: 'Mahboula-3',           area: 'Shafiq' },
+  'MB4': { name: 'Mahboula-4',           area: 'Shafiq' },
+  'MB5': { name: 'Mahboula-5',           area: 'Shafiq' },
+  'MB6': { name: 'Mahboula-6',           area: 'Shafiq' },
+  'MB7': { name: 'Mahboula-7',           area: 'Shafiq' },
+  'MB8': { name: 'Mahboula-8',           area: 'Shafiq' },
+  'MBL': { name: 'Mahboula',             area: 'Shafiq' },
+  'MET': { name: 'Metro Farwaniya',      area: 'Abdrabou' },
+  'MG2': { name: 'Mangaf-2',             area: 'Shafiq' },
+  'MG3': { name: 'Mangaf-3',             area: 'Shafiq' },
+  'MGF': { name: 'Mangaf',               area: 'Shafiq' },
+  'MHO': { name: 'Murgab (H)',           area: 'Renosh' },
+  'MRB': { name: 'Murgab Roundabout',    area: 'Renosh' },
+  'MUB': { name: 'Mubarakiya',           area: 'Renosh' },
+  'MUT': { name: 'Muthaida',             area: 'Renosh' },
+  'RIG': { name: 'Riggae',               area: 'Renosh' },
+  'SA4': { name: 'Salmiya-4',            area: 'Abdrabou' },
+  'SA5': { name: 'Salmiya-5',            area: 'Abdrabou' },
+  'SA6': { name: 'Salmiya-6',            area: 'Abdrabou' },
+  'SAL': { name: 'Salmiya',              area: 'Abdrabou' },
+  'SD1': { name: 'Shadadiya-1',          area: 'Renosh' },
+  'SWK': { name: 'Shuwaikh',             area: 'Renosh' },
+  'T5A': { name: 'Jazeera Airside',      area: 'Abdrabou' },
+  'WAT': { name: 'Watiya',               area: 'Renosh' }
+};
+const BEC_UNASSIGNED_AREA = 'Unassigned';
 const ANSARI_BRANCH_META = {
   '1106': { name: 'Maliya UTC',        area: 'SHABIR AREA' },
   '2110': { name: 'Al Salam Mall',     area: 'SHABIR AREA' },
@@ -452,7 +512,10 @@ async function loadAll(){
 
     const becCodes = new Set();
     DATA.forEach(r => { if (!r.isHO) becCodes.add(r.code); });
-    BEC_BRANCH_LIST = [...becCodes].sort().map(code => ({ code, name: code }));
+    BEC_BRANCH_LIST = [...becCodes].sort().map(code => {
+      const meta = BEC_BRANCH_META[code];
+      return meta ? { code, name: meta.name, area: meta.area } : { code, name: code, area: BEC_UNASSIGNED_AREA };
+    });
 
     CUR_LIST_BY_ENTITY.bec = [...new Set(DATA.map(r => r.cur))]
       .sort((a,b) => {
@@ -489,26 +552,45 @@ function fmtPct(n){
 }
 function branchNameFor(entity, code){
   if (entity === 'ansari') return (ANSARI_BRANCH_META[code] || {}).name || code;
-  return code;
+  return (BEC_BRANCH_META[code] || {}).name || code;
 }
 function branchAreaFor(entity, code){
   if (entity === 'ansari') return (ANSARI_BRANCH_META[code] || {}).area || null;
-  return null;
+  return (BEC_BRANCH_META[code] || {}).area || BEC_UNASSIGNED_AREA;
 }
 function branchListFor(entity){
   if (entity === 'ansari') {
     return Object.keys(ANSARI_BRANCH_META).filter(c => c !== '9999')
       .map(code => ({ code, name: ANSARI_BRANCH_META[code].name, area: ANSARI_BRANCH_META[code].area }));
   }
-  return BEC_BRANCH_LIST.map(b => ({ code: b.code, name: b.name, area: null }));
+  return BEC_BRANCH_LIST;
 }
-function entityHasAreas(entity){ return entity === 'ansari'; }
+function areaListFor(entity){
+  if (entity === 'ansari') return AREA_LIST;
+  return [...new Set(BEC_BRANCH_LIST.map(b => b.area))].sort((a,b) => {
+    if (a === BEC_UNASSIGNED_AREA) return 1;
+    if (b === BEC_UNASSIGNED_AREA) return -1;
+    return a.localeCompare(b);
+  });
+}
+function entityHasAreas(entity){ return true; }
 function entityHasBuy(entity){ return entity === 'bec'; }
 
 function codesForAreaFilter(entity, filter){
   const list = branchListFor(entity);
   if (filter === 'ALL') return list.map(b => b.code);
-  if (AREA_LIST.includes(filter)) return list.filter(b => b.area === filter).map(b => b.code);
+  if (areaListFor(entity).includes(filter)) return list.filter(b => b.area === filter).map(b => b.code);
+  return [filter];
+}
+
+// Same as codesForAreaFilter, but restricted to branches that actually had
+// a real transaction last month — used wherever there's a Branch/Area
+// dropdown for drill-down analysis, so dormant/historical-only branch
+// codes don't clutter the choices or skew the numbers.
+function activeCodesForAreaFilter(entity, filter){
+  const list = activeBranchesFor(entity, prevMonthRange(entity));
+  if (filter === 'ALL') return list.map(b => b.code);
+  if (areaListFor(entity).includes(filter)) return list.filter(b => b.area === filter).map(b => b.code);
   return [filter];
 }
 
@@ -765,7 +847,7 @@ function renderCards(){
   const lastMonth = prevMonthRange(entityScope);
   const activeBranches = activeBranchesFor(entityScope, lastMonth);
   const locationsVal = summaryScope === 'ho' ? '1' : activeBranches.length.toLocaleString();
-  const locationsSub = summaryScope === 'ho' ? 'Wholesale' : (entityHasAreas(entityScope) ? 'Active last month, across ' + AREA_LIST.length + ' areas' : 'Active last month');
+  const locationsSub = summaryScope === 'ho' ? 'Wholesale' : (entityHasAreas(entityScope) ? 'Active last month, across ' + areaListFor(entityScope).length + ' areas' : 'Active last month');
 
   const profitText = cur.profit === null ? 'N/A' : fmtCurrency(cur.profit);
   const profitSub = (entityScope === 'ansari' && cur.profitPartial) ? { text: 'Partial — some months not entered', cls: '' } : subFor('profit');
@@ -1035,7 +1117,7 @@ let branchBranchFilter = 'ALL';
 let branchTxnTypes = new Set(['sell', 'buy']);
 
 function branchRowsFor(range, areaFilter, types){
-  const list = branchListFor(entityScope).filter(b => areaFilter === 'ALL' || b.area === areaFilter);
+  const list = activeBranchesFor(entityScope, prevMonthRange(entityScope)).filter(b => areaFilter === 'ALL' || b.area === areaFilter);
   return list.map(b => {
     const rows = range ? filterRows(DATA, { entity: entityScope, codes: [b.code], types, start: range.start, end: range.end }) : [];
     const agg = realAgg(rows);
@@ -1045,19 +1127,19 @@ function branchRowsFor(range, areaFilter, types){
 }
 
 function renderBranchPanel(){
-  document.getElementById('branchHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
+  document.getElementById('branchHint').textContent = (currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)') + ' · active branches only';
   const range = periodRange(entityScope, currentTab);
   const hasAreas = entityHasAreas(entityScope);
 
   const areaSelect = document.getElementById('branchAreaSelect');
   areaSelect.innerHTML = hasAreas
-    ? ['ALL', ...AREA_LIST].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
+    ? ['ALL', ...areaListFor(entityScope)].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
     : '<option value="ALL">All Branches</option>';
   areaSelect.value = branchAreaFilter;
   areaSelect.disabled = !hasAreas;
   areaSelect.onchange = () => { branchAreaFilter = areaSelect.value; branchBranchFilter = 'ALL'; renderBranchPanel(); };
 
-  const branchesInArea = branchListFor(entityScope).filter(b => branchAreaFilter === 'ALL' || b.area === branchAreaFilter);
+  const branchesInArea = activeBranchesFor(entityScope, prevMonthRange(entityScope)).filter(b => branchAreaFilter === 'ALL' || b.area === branchAreaFilter);
   const branchLabel = branchAreaFilter === 'ALL' ? 'Top 10 Branches' : 'Top 10 in ' + branchAreaFilter;
   const branchSelect = document.getElementById('branchBranchSelect');
   branchSelect.innerHTML = [['ALL', branchLabel], ...branchesInArea.map(b => [b.code, b.name])]
@@ -1118,19 +1200,19 @@ let curMetric = 'amt';
 let curTxnTypes = new Set(['sell', 'buy']);
 
 function renderCurrencyPanel(){
-  document.getElementById('curHint').textContent = currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)';
+  document.getElementById('curHint').textContent = (currentTab === 'mtd' ? 'Month to date (real data)' : 'Year to date (real data)') + ' · active branches only';
   const range = periodRange(entityScope, currentTab);
   const hasAreas = entityHasAreas(entityScope);
 
   const areaSelect = document.getElementById('curAreaSelect');
   areaSelect.innerHTML = hasAreas
-    ? ['ALL', ...AREA_LIST].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
+    ? ['ALL', ...areaListFor(entityScope)].map(a => `<option value="${a}">${a === 'ALL' ? 'All Areas' : a}</option>`).join('')
     : '<option value="ALL">All Branches</option>';
   areaSelect.value = curAreaFilter;
   areaSelect.disabled = !hasAreas;
   areaSelect.onchange = () => { curAreaFilter = areaSelect.value; curBranchFilter = 'ALL'; renderCurrencyPanel(); };
 
-  const branchesInArea = branchListFor(entityScope).filter(b => curAreaFilter === 'ALL' || b.area === curAreaFilter);
+  const branchesInArea = activeBranchesFor(entityScope, prevMonthRange(entityScope)).filter(b => curAreaFilter === 'ALL' || b.area === curAreaFilter);
   const branchLabel = curAreaFilter === 'ALL' ? 'All Branches' : 'All in ' + curAreaFilter;
   const branchSelect = document.getElementById('curBranchSelect');
   branchSelect.innerHTML = [['ALL', branchLabel], ...branchesInArea.map(b => [b.code, b.name])]
@@ -1151,7 +1233,7 @@ function renderCurrencyPanel(){
   });
   if (entityScope !== 'bec' && curMetric === 'profit') curMetric = 'amt';
 
-  const scopeCodes = curBranchFilter === 'ALL' ? codesForAreaFilter(entityScope, curAreaFilter) : [curBranchFilter];
+  const scopeCodes = curBranchFilter === 'ALL' ? activeCodesForAreaFilter(entityScope, curAreaFilter) : [curBranchFilter];
   const types = [...curTxnTypes];
   const scopeRecords = range ? filterRows(DATA, { entity: entityScope, codes: scopeCodes, types, start: range.start, end: range.end }) : [];
   const curs = [...new Set(scopeRecords.map(r => r.cur))];
